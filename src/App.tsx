@@ -7,8 +7,11 @@ import FilterBar from './components/FilterBar'
 import AuthModal from './components/AuthModal'
 import SubmitModal from './components/SubmitModal'
 import AdminPanel from './components/AdminPanel'
-import { countPending, fetchApprovedVenues } from './lib/api'
-import type { Venue } from './types'
+import ListingActions from './components/ListingActions'
+import ReportModal from './components/ReportModal'
+import MySubmissionsModal from './components/MySubmissionsModal'
+import { countOpenReports, countPending, fetchApprovedVenues } from './lib/api'
+import type { OpenMicWithVenue, Venue } from './types'
 
 export default function App() {
   const {
@@ -18,12 +21,25 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false)
   const [showSubmit, setShowSubmit] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
+  const [showMine, setShowMine] = useState(false)
+  const [reporting, setReporting] = useState<OpenMicWithVenue | null>(null)
+  const [adminEditing, setAdminEditing] = useState<OpenMicWithVenue | null>(null)
   const [venues, setVenues] = useState<Venue[]>([])
   const [pending, setPending] = useState(0)
+  const [reportCount, setReportCount] = useState(0)
   const [flash, setFlash] = useState('')
 
-  const refreshPending = () => { if (isAdmin) void countPending().then(setPending) }
-  useEffect(() => { refreshPending() }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  const notify = (message: string) => {
+    setFlash(message)
+    window.setTimeout(() => setFlash(f => (f === message ? '' : f)), 4000)
+  }
+  const refreshCounts = () => {
+    if (!isAdmin) return
+    void countPending().then(setPending)
+    void countOpenReports().then(setReportCount)
+  }
+  useEffect(() => { refreshCounts() }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  const attention = pending + reportCount
 
   const openSubmit = async () => {
     if (!user) { setShowAuth(true); return }
@@ -49,10 +65,15 @@ export default function App() {
               <span className="sm:hidden">+ Add</span><span className="hidden sm:inline">+ Add an open mic</span>
             </button>
           )}
+          {user && (
+            <button className="text-sm font-bold border-2 border-white/40 text-white px-3 h-9" onClick={() => setShowMine(true)}>
+              <span className="sm:hidden">Mine</span><span className="hidden sm:inline">My submissions</span>
+            </button>
+          )}
           {isAdmin && (
             <button className="text-sm font-bold border-2 border-accent text-white px-3 h-9" onClick={() => setShowAdmin(true)}>
-              Review{pending > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{pending}</span>}
-              <span className="sr-only"> submissions</span>
+              Review{attention > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{attention}</span>}
+              <span className="sr-only"> submissions and reports</span>
             </button>
           )}
           {isAdmin && <span className="hidden sm:inline text-[10px] font-extrabold uppercase tracking-wider bg-accent px-2 py-1">Admin</span>}
@@ -104,7 +125,16 @@ export default function App() {
             )}
             {listed.map(m => (
               <OpenMicCard key={m.id} mic={m} expanded={selectedVenueId === m.venueId}
-                onSelect={() => { selectVenue(m.venueId); setView('map') }} />
+                onSelect={() => { selectVenue(m.venueId); setView('map') }}
+                actions={
+                  <ListingActions
+                    mic={m} user={user} isAdmin={isAdmin}
+                    onNeedAuth={() => setShowAuth(true)}
+                    onReport={setReporting}
+                    onEdit={setAdminEditing}
+                    onChanged={message => { notify(message); void fetchMics(); refreshCounts() }}
+                  />
+                } />
             ))}
           </div>
         </section>
@@ -121,11 +151,25 @@ export default function App() {
       {showSubmit && user && (
         <SubmitModal user={user} venues={venues} onClose={submitted => {
           setShowSubmit(false)
-          if (submitted) { setFlash('Submitted for review.'); refreshPending(); setTimeout(() => setFlash(''), 4000) }
+          if (submitted) { notify('Submitted for review.'); refreshCounts() }
         }} />
       )}
-      {showAdmin && isAdmin && (
-        <AdminPanel onClose={() => setShowAdmin(false)} onChanged={() => { refreshPending(); void fetchMics() }} />
+      {showAdmin && isAdmin && user && (
+        <AdminPanel user={user} onClose={() => setShowAdmin(false)} onChanged={() => { refreshCounts(); void fetchMics() }} />
+      )}
+      {showMine && user && (
+        <MySubmissionsModal user={user} isAdmin={isAdmin} onClose={() => setShowMine(false)}
+          onChanged={message => { notify(message); refreshCounts(); void fetchMics() }} />
+      )}
+      {reporting && user && (
+        <ReportModal mic={reporting} user={user} onClose={sent => {
+          setReporting(null)
+          if (sent) { notify('Thanks. A moderator will take a look.'); refreshCounts() }
+        }} />
+      )}
+      {adminEditing && user && isAdmin && (
+        <SubmitModal user={user} venues={[]} editing={{ mic: adminEditing, venueEditable: true }}
+          onClose={saved => { setAdminEditing(null); if (saved) { notify('Changes saved.'); void fetchMics() } }} />
       )}
 
       {(showAuth || needsPasswordReset) && (

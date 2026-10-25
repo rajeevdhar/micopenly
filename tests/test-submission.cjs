@@ -55,5 +55,23 @@ eq('mic row sorts weeks, trims, nulls blanks', [m.weeks_of_month, m.slot_minutes
 eq('mic row never sets last_verified_at', 'last_verified_at' in m, false)
 eq('mic row has no status override fields', Object.keys(m).includes('id'), false)
 
+// edit support
+const vf = s.venueFields({ ...goodVenue, websiteUrl: 'tavern.com' })
+eq('venueFields has no status/owner', ['status', 'submitted_by'].filter(k => k in vf), [])
+const mf = s.micFields(goodMic)
+eq('micFields has no status/owner/venue/verification', ['status', 'submitted_by', 'venue_id', 'last_verified_at'].filter(k => k in mf), [])
+const saved = { id: 'm1', venueId: 'v1', title: 'Thu Songs', format: 'music', genres: ['Rock'], dayOfWeek: 4, weeksOfMonth: [-1, 1],
+  startTime: '19:30:00', endTime: '22:00:00', signupMethod: 'online', signupTime: '19:00:00', signupUrl: 'https://x.example/s', slotMinutes: 10,
+  hostName: 'Sam', houseGear: 'PA', costNote: 'Free', ageRestriction: '21_plus', notes: 'n', status: 'approved', createdAt: 'x',
+  venue: { id: 'v1', name: 'Tavern', address: '1 Main', city: 'Town', region: 'NJ', country: 'US', lat: 40.1, lng: -74.1, timezone: 'America/New_York',
+    websiteUrl: 'https://t.example/', status: 'approved', createdAt: 'x' } }
+const dr = s.draftsFromMic(saved)
+eq('draft times drop seconds for <input type=time>', [dr.mic.startTime, dr.mic.endTime, dr.mic.signupTime], ['19:30', '22:00', '19:00'])
+eq('draft numbers become strings', dr.mic.slotMinutes, '10')
+eq('draft missing optionals become empty strings', [dr.venue.postalCode, dr.venue.instagramUrl], ['', ''])
+eq('a saved listing converted to a draft validates cleanly', s.validate(dr.venue, dr.mic), {})
+const round = s.micFields(dr.mic)
+eq('round trip keeps data (weeks sorted)', [round.title, round.weeks_of_month, round.start_time, round.slot_minutes, round.signup_url], ['Thu Songs', [-1, 1], '19:30', 10, 'https://x.example/s'])
+
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

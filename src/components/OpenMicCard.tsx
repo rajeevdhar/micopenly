@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { OpenMicWithVenue } from '../types'
 import { AGE_OPTIONS, FORMAT_OPTIONS, SIGNUP_OPTIONS } from '../types'
 import { describeRecurrence, formatTime, isStale, isTonight, verifiedAgo } from '../lib/schedule'
@@ -13,10 +14,14 @@ function safeUrl(u?: string): string | null {
   } catch { return null }
 }
 
-export default function OpenMicCard({ mic, expanded = false, onSelect }: {
+export default function OpenMicCard({ mic, expanded = false, onSelect, actions, showFreshness = true }: {
   mic: OpenMicWithVenue
   expanded?: boolean
   onSelect?: () => void
+  /** Rendered under the details when the card is expanded. */
+  actions?: ReactNode
+  /** Hide the “verified / may be out of date” line (used for listings not yet public). */
+  showFreshness?: boolean
 }) {
   const tonight = isTonight(mic, mic.venue.timezone)
   const stale = isStale(mic.lastVerifiedAt)
@@ -41,9 +46,11 @@ export default function OpenMicCard({ mic, expanded = false, onSelect }: {
         <p className="mt-2 text-sm font-bold">{when}</p>
       </button>
 
-      <p className={`mt-2 text-xs ${stale ? 'text-accent-dark font-bold' : 'text-mute'}`}>
-        {stale && '⚠ '}{verifiedAgo(mic.lastVerifiedAt)}{stale && ' — details may be out of date'}
-      </p>
+      {showFreshness && (
+        <p className={`mt-2 text-xs ${stale ? 'text-accent-dark font-bold' : 'text-mute'}`}>
+          {stale && '⚠ '}{verifiedAgo(mic.lastVerifiedAt)}{stale && ' — details may be out of date'}
+        </p>
+      )}
 
       {expanded && (
         <dl className="mt-3 pt-3 border-t-2 border-line grid grid-cols-[96px_1fr] gap-x-3 gap-y-1.5 text-sm">
@@ -71,6 +78,7 @@ export default function OpenMicCard({ mic, expanded = false, onSelect }: {
           )}
         </dl>
       )}
+      {expanded && actions}
     </article>
   )
 }

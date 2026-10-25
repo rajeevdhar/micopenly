@@ -2,7 +2,7 @@
 // Kept free of React/Supabase so they can be unit-tested (tests/test-submission.cjs).
 
 import type {
-  AgeRestriction, DayOfWeek, OpenMicFormat, SignupMethod, WeekOfMonth,
+  AgeRestriction, DayOfWeek, OpenMicFormat, OpenMicWithVenue, SignupMethod, WeekOfMonth,
 } from '../types'
 
 export interface VenueDraft {
@@ -128,7 +128,8 @@ export function validate(v: VenueDraft, m: MicDraft): Errors {
 
 const orNull = (s: string): string | null => (s.trim() ? s.trim() : null)
 
-export function venueRow(v: VenueDraft, userId: string) {
+/** The editable venue columns (no status / owner), shared by create and edit. */
+export function venueFields(v: VenueDraft) {
   return {
     name: v.name.trim(),
     address: v.address.trim(),
@@ -141,14 +142,16 @@ export function venueRow(v: VenueDraft, userId: string) {
     timezone: v.timezone,
     website_url: orNull(cleanUrl(v.websiteUrl) ?? ''),
     instagram_url: orNull(cleanInstagram(v.instagramUrl) ?? ''),
-    status: 'pending' as const,
-    submitted_by: userId,
   }
 }
 
-export function micRow(m: MicDraft, venueId: string, userId: string) {
+export function venueRow(v: VenueDraft, userId: string) {
+  return { ...venueFields(v), status: 'pending' as const, submitted_by: userId }
+}
+
+/** The editable open-mic columns (no venue / status / owner / verification), shared by create and edit. */
+export function micFields(m: MicDraft) {
   return {
-    venue_id: venueId,
     title: m.title.trim(),
     format: m.format,
     genres: m.genres,
@@ -165,8 +168,31 @@ export function micRow(m: MicDraft, venueId: string, userId: string) {
     cost_note: orNull(m.costNote),
     age_restriction: m.ageRestriction,
     notes: orNull(m.notes),
-    status: 'pending' as const,
-    submitted_by: userId,
+  }
+}
+
+export function micRow(m: MicDraft, venueId: string, userId: string) {
+  return { venue_id: venueId, ...micFields(m), status: 'pending' as const, submitted_by: userId }
+}
+
+/** Turn a saved listing back into form drafts for editing. */
+export function draftsFromMic(m: OpenMicWithVenue): { venue: VenueDraft; mic: MicDraft } {
+  const v = m.venue
+  return {
+    venue: {
+      existingVenueId: null, name: v.name, address: v.address, city: v.city,
+      region: v.region ?? '', postalCode: v.postalCode ?? '', lat: v.lat, lng: v.lng,
+      timezone: v.timezone, websiteUrl: v.websiteUrl ?? '', instagramUrl: v.instagramUrl ?? '',
+    },
+    mic: {
+      title: m.title, format: m.format, genres: [...m.genres], dayOfWeek: m.dayOfWeek,
+      weeksOfMonth: [...m.weeksOfMonth], startTime: m.startTime.slice(0, 5),
+      endTime: m.endTime ? m.endTime.slice(0, 5) : '', signupMethod: m.signupMethod,
+      signupTime: m.signupTime ? m.signupTime.slice(0, 5) : '', signupUrl: m.signupUrl ?? '',
+      slotMinutes: m.slotMinutes ? String(m.slotMinutes) : '', hostName: m.hostName ?? '',
+      houseGear: m.houseGear ?? '', costNote: m.costNote ?? '', ageRestriction: m.ageRestriction,
+      notes: m.notes ?? '',
+    },
   }
 }
 

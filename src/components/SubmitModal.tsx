@@ -5,10 +5,11 @@ import {
   type DayOfWeek, type Venue, type WeekOfMonth,
 } from '../types'
 import {
-  EMPTY_MIC, EMPTY_VENUE, TIMEZONES, geocode, guessTimezone, validate,
+  EMPTY_MIC, EMPTY_VENUE, TIMEZONES, draftsFromMic, geocode, guessTimezone, validate,
   type Errors, type MicDraft, type VenueDraft,
 } from '../lib/submission'
-import { submitOpenMic } from '../lib/api'
+import { submitOpenMic, updateListing } from '../lib/api'
+import type { OpenMicWithVenue } from '../types'
 import PinPicker from './PinPicker'
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -30,13 +31,19 @@ function Field({ label, error, hint, children, htmlFor }: {
   )
 }
 
-export default function SubmitModal({ user, venues, onClose }: {
+/** Pass `editing` to change an existing listing instead of creating one. */
+export interface Editing { mic: OpenMicWithVenue; venueEditable: boolean }
+
+export default function SubmitModal({ user, venues, editing, onClose }: {
   user: User
   venues: Venue[]
+  editing?: Editing
   onClose: (submitted: boolean) => void
 }) {
-  const [venue, setVenue] = useState<VenueDraft>(EMPTY_VENUE)
-  const [mic, setMic] = useState<MicDraft>(EMPTY_MIC)
+  const initial = editing ? draftsFromMic(editing.mic) : null
+  const [venue, setVenue] = useState<VenueDraft>(
+    initial ? { ...initial.venue, existingVenueId: editing!.venueEditable ? null : editing!.mic.venueId } : EMPTY_VENUE)
+  const [mic, setMic] = useState<MicDraft>(initial ? initial.mic : EMPTY_MIC)
   const [errors, setErrors] = useState<Errors>({})
   const [lookup, setLookup] = useState<{ busy: boolean; msg: string }>({ busy: false, msg: '' })
   const [busy, setBusy] = useState(false)
@@ -85,9 +92,12 @@ export default function SubmitModal({ user, venues, onClose }: {
       return
     }
     setBusy(true)
-    const { error } = await submitOpenMic(user.id, venue, mic)
+    const { error } = editing
+      ? await updateListing(editing.mic, editing.venueEditable ? venue : null, mic)
+      : await submitOpenMic(user.id, venue, mic)
     setBusy(false)
     if (error) setServerError(error)
+    else if (editing) onClose(true)
     else setDone(true)
   }
 
@@ -110,25 +120,34 @@ export default function SubmitModal({ user, venues, onClose }: {
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(false) }}>
-      <div className="modal-box modal-wide" role="dialog" aria-modal="true" aria-label="Add an open mic">
+      <div className="modal-box modal-wide" role="dialog" aria-modal="true" aria-label={editing ? 'Edit open mic' : 'Add an open mic'}>
         <div className="sticky top-0 z-10 bg-ground flex items-center justify-between px-5 py-4 border-b-2 border-ink">
-          <h2 className="text-lg">Add an open mic</h2>
+          <h2 className="text-lg">{editing ? 'Edit open mic' : 'Add an open mic'}</h2>
           <button onClick={() => onClose(false)} aria-label="Close" className="text-2xl leading-none text-mute hover:text-ink">×</button>
         </div>
 
         <form onSubmit={submit} noValidate className="p-5 space-y-6">
-          <p className="text-sm text-mute">Only add open mics you know are real. Submissions are reviewed before they appear.</p>
+          <p className="text-sm text-mute">
+            {editing ? 'Changes to a listing that’s still waiting for review stay in the review queue.'
+              : 'Only add open mics you know are real. Submissions are reviewed before they appear.'}
+          </p>
 
           {/* ── Venue ── */}
           <fieldset className="space-y-3">
             <legend className="text-sm font-extrabold uppercase tracking-widest mb-2">1 · Venue</legend>
-            <Field label="Which venue?" htmlFor="venue-pick">
+            {editing && !editing.venueEditable && (
+              <p className="text-sm border-2 border-line bg-white p-3">
+                <strong>{editing.mic.venue.name}</strong><br />
+                <span className="text-mute">{editing.mic.venue.address}, {editing.mic.venue.city}. The venue is already approved; to change it, use “Report a problem”.</span>
+              </p>
+            )}
+            {!editing && <Field label="Which venue?" htmlFor="venue-pick">
               <select id="venue-pick" className="field" value={venue.existingVenueId ?? ''}
                 onChange={e => setV({ existingVenueId: e.target.value || null })}>
                 <option value="">+ A venue that isn’t listed yet</option>
                 {sortedVenues.map(v => <option key={v.id} value={v.id}>{v.name} — {v.city}</option>)}
               </select>
-            </Field>
+            </Field>}
 
             {isNew && (
               <>
@@ -266,7 +285,7 @@ export default function SubmitModal({ user, venues, onClose }: {
           {Object.keys(errors).length > 0 && <p className="text-sm text-accent-dark font-bold">Please fix the highlighted fields.</p>}
 
           <div className="flex gap-2">
-            <button className="btn btn-primary" disabled={busy}>{busy ? 'Submitting…' : 'Submit for review'}</button>
+            <button className="btn btn-primary" disabled={busy}>{busy ? (editing ? 'Saving…' : 'Submitting…') : (editing ? 'Save changes' : 'Submit for review')}</button>
             <button type="button" className="btn" onClick={() => onClose(false)}>Cancel</button>
           </div>
         </form>
