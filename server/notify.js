@@ -1,5 +1,6 @@
-// Email alerts. Runs inside the web server on a timer and uses the Supabase SERVICE-ROLE key, which
-// must only ever exist in the server's environment (never in VITE_ variables or the browser bundle).
+// Email alerts. Runs as its OWN Railway service (server/worker.js), separate from the public web server,
+// and uses the Supabase SERVICE-ROLE key. That key must exist only in the worker's environment: never
+// in VITE_ variables, never on the web service.
 //
 //   • Admin(s): one digest for new submissions waiting for review and new problem reports.
 //   • A host:   one email per batch of new address requests for their hidden-location venues.
@@ -158,12 +159,18 @@ export async function runOnce(cfg, { fetchImpl = fetch, send = makeSender(cfg, f
   return summary
 }
 
-/** Starts the timer. Does nothing (and says why) if email isn't configured. */
+/** Names of the settings still needed before alerts can run (empty when ready). */
+export function missingSettings(env = process.env) {
+  const cfg = readConfig(env)
+  return [!cfg.url && 'SUPABASE_URL (or VITE_SUPABASE_URL)', !cfg.serviceKey && 'SUPABASE_SERVICE_ROLE_KEY',
+    !(env.RESEND_API_KEY || env.SMTP_URL) && 'RESEND_API_KEY or SMTP_URL', !env.MAIL_FROM && 'MAIL_FROM'].filter(Boolean)
+}
+
+/** Starts the timer (the caller keeps the process alive). Does nothing, and says why, if not configured. */
 export function startNotifier(env = process.env, log = console) {
   const cfg = readConfig(env)
   if (!cfg.enabled) {
-    const missing = [!cfg.url && 'SUPABASE_URL', !cfg.serviceKey && 'SUPABASE_SERVICE_ROLE_KEY', !(env.RESEND_API_KEY || env.SMTP_URL) && 'RESEND_API_KEY or SMTP_URL', !env.MAIL_FROM && 'MAIL_FROM'].filter(Boolean)
-    log.log(`[notify] email alerts off (missing: ${missing.join(', ')})`)
+    log.log(`[notify] email alerts off (missing: ${missingSettings(env).join(', ')})`)
     return null
   }
   let running = false
@@ -175,6 +182,6 @@ export function startNotifier(env = process.env, log = console) {
     finally { running = false }
   }
   log.log(`[notify] email alerts on, every ${Math.round(cfg.intervalMs / 1000)}s`)
-  setTimeout(tick, 20000).unref?.()
-  return setInterval(tick, cfg.intervalMs).unref?.() ?? null
+  setTimeout(tick, Number(env.NOTIFY_FIRST_DELAY_MS ?? 20000))
+  return setInterval(tick, cfg.intervalMs)
 }

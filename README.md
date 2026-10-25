@@ -35,6 +35,8 @@ Done: map, list, filters (tonight / day / type / search), sign-in, submit form (
 Next (Phase 2): saved mics, more filters, shareable links and link previews, near-me.
 
 
-## Email alerts
+## Email alerts (separate worker service)
 
-The server checks every 2 minutes and emails you once per new submission or problem report (one digest), and each host once per batch of new address requests. It is off until these Railway variables are set (see `.env.local.example`): `SUPABASE_SERVICE_ROLE_KEY`, `MAIL_FROM`, and either `RESEND_API_KEY` or `SMTP_URL`; `ADMIN_EMAIL` says who gets the admin digest. Run `supabase/migrations/2026-10-25_notification_log.sql` once. The service-role key bypasses row-level security, so keep it server-side only.
+A second Railway service, "worker", runs `node server/worker.js` from this same repo (branch `v1`) with config file `railway.worker.json`. It checks every 2 minutes and emails the admin one digest per new submission or problem report, and each host once per batch of new address requests. It keeps the public web service free of the service-role key, which bypasses row-level security.
+
+Set these on the **worker only**: `VITE_SUPABASE_URL` (same value as the web service), `SUPABASE_SERVICE_ROLE_KEY`, `MAIL_FROM`, `ADMIN_EMAIL`, and either `RESEND_API_KEY` or `SMTP_URL`. Run `supabase/migrations/2026-10-25_notification_log.sql` once. If anything is missing the worker exits with a message naming it. See `.env.local.example`.

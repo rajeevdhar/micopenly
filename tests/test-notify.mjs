@@ -122,5 +122,24 @@ const cfg = readConfig(env)
   ok('a host with no email on file is skipped without crashing, and retried later', w.outbox.length === 0 && w.sent.length === 0 && s.errors === 0)
 }
 
+// ── The worker is separate from the public web server ──
+import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+const web = readFileSync('server.js', 'utf8')
+ok('the public web server does not load the notifier or mention the service key', !/notify|SERVICE_ROLE|startNotifier/.test(web.replace(/^\/\/.*$/gm, '')))
+const baseEnv = { PATH: process.env.PATH }
+{
+  const r = spawnSync('node', ['server/worker.js'], { env: baseEnv, encoding: 'utf8', timeout: 8000 })
+  ok('the worker refuses to start when unconfigured, naming what is missing', r.status === 1 && /SUPABASE_SERVICE_ROLE_KEY/.test(r.stderr) && /MAIL_FROM/.test(r.stderr), `${r.status} ${r.stderr}`)
+  const partial = spawnSync('node', ['server/worker.js'], { env: { ...baseEnv, VITE_SUPABASE_URL: 'https://x.supabase.co', RESEND_API_KEY: 'k', MAIL_FROM: 'a@b.co' }, encoding: 'utf8', timeout: 8000 })
+  ok('a worker with no service key also refuses', partial.status === 1 && /SUPABASE_SERVICE_ROLE_KEY/.test(partial.stderr) && !/RESEND/.test(partial.stderr))
+  const live = spawnSync('node', ['server/worker.js'], { env: { ...baseEnv, VITE_SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', RESEND_API_KEY: 'k', MAIL_FROM: 'a@b.co', NOTIFY_FIRST_DELAY_MS: '600000' }, encoding: 'utf8', timeout: 1500, killSignal: 'SIGTERM' })
+  ok('a configured worker stays running (keeps the process alive) until told to stop, then exits cleanly', live.error?.code === 'ETIMEDOUT' || live.status === 0, `${live.status} ${live.signal} ${live.stdout}`)
+  ok('a configured worker announces itself', /email alerts on/.test(live.stdout), live.stdout)
+}
+const rj = JSON.parse(readFileSync('railway.worker.json', 'utf8'))
+ok('the worker config starts the worker with no health-check port and a bounded restart policy', rj.deploy.startCommand === 'node server/worker.js' && !rj.deploy.healthcheckPath && rj.deploy.restartPolicyMaxRetries === 5)
+ok('the web config still starts the web server', JSON.parse(readFileSync('railway.json', 'utf8')).deploy.startCommand === 'node server.js')
+
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
