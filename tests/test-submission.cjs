@@ -73,5 +73,25 @@ eq('a saved listing converted to a draft validates cleanly', s.validate(dr.venue
 const round = s.micFields(dr.mic)
 eq('round trip keeps data (weeks sorted)', [round.title, round.weeks_of_month, round.start_time, round.slot_minutes, round.signup_url], ['Thu Songs', [-1, 1], '19:30', 10, 'https://x.example/s'])
 
+// hidden exact location
+const hv = { ...goodVenue, locationHidden: true, address: '12 Elm St', postalCode: '07030', lat: 40.745123, lng: -74.031987 }
+const town = { lat: 40.743991, lng: -74.032363 }
+const hf = s.venueFields(hv, town)
+eq('hidden: public address is the placeholder', hf.address, 'Address shared on request')
+eq('hidden: public ZIP dropped', hf.postal_code, null)
+eq('hidden: public pin is the town centre rounded to 2 decimals', [hf.lat, hf.lng], [40.74, -74.03])
+eq('hidden: flag set', hf.location_hidden, true)
+const leak = JSON.stringify(s.venueRow(hv, 'user-1', town))
+eq('hidden: public row contains neither the street, the ZIP nor the exact pin', ['12 Elm', '07030', '40.745', '74.0319'].filter(x => leak.includes(x)), [])
+const fb = s.venueFields(hv, null)
+eq('hidden: no town found falls back to a ~11 km snap, never the exact pin', [fb.lat, fb.lng], [40.7, -74])
+eq('hidden: private fields carry the exact data', s.privateFields(hv), { address: '12 Elm St', postal_code: '07030', lat: 40.745123, lng: -74.031987 })
+eq('visible venue keeps its exact pin and address', [s.venueFields(goodVenue).address, s.venueFields(goodVenue).location_hidden], [goodVenue.address, false])
+eq('roundCoord', [s.roundCoord(40.746), s.roundCoord(-74.0319), s.roundCoord(10)], [40.75, -74.03, 10])
+const hiddenSaved = { ...saved, venue: { ...saved.venue, locationHidden: true, address: 'Address shared on request', lat: 40.74, lng: -74.03 } }
+const hd = s.draftsFromMic(hiddenSaved)
+eq('editing a hidden venue starts with a blank address and no pin (real one is loaded privately)', [hd.venue.address, hd.venue.lat, hd.venue.lng, hd.venue.locationHidden], ['', null, null, true])
+eq('a hidden draft is incomplete until the private address is loaded', Object.keys(s.validate(hd.venue, hd.mic)).sort(), ['address', 'location'])
+
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

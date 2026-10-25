@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import type { ListingStatus, OpenMicWithVenue } from '../types'
-import { fetchMine } from '../lib/api'
+import { decideRequest, fetchIncomingRequests, fetchMine, type IncomingRequest } from '../lib/api'
 import OpenMicCard from './OpenMicCard'
 import SubmitModal from './SubmitModal'
 
@@ -21,12 +21,27 @@ export default function MySubmissionsModal({ user, isAdmin, onClose, onChanged }
   const [items, setItems] = useState<OpenMicWithVenue[] | null>(null)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<OpenMicWithVenue | null>(null)
+  const [requests, setRequests] = useState<IncomingRequest[]>([])
+  const [busyReq, setBusyReq] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const { data, error: err } = await fetchMine(user.id)
-    if (err) setError(err); else { setItems(data); setError('') }
+    if (err) { setError(err); return }
+    setItems(data); setError('')
+    const hidden = [...new Set((data ?? []).filter(m => m.venue.locationHidden && m.venue.status === 'approved').map(m => m.venueId))]
+    const r = await fetchIncomingRequests(hidden)
+    if (r.error) setError(r.error); else setRequests(r.data)
   }, [user.id])
   useEffect(() => { void load() }, [load])
+
+  const decide = async (id: string, status: 'approved' | 'declined') => {
+    setBusyReq(id); setError('')
+    const { error: err } = await decideRequest(id, status)
+    setBusyReq(null)
+    if (err) { setError(err); return }
+    await load()
+    onChanged(status === 'approved' ? 'Approved. They can now see the address.' : 'Declined.')
+  }
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -38,6 +53,31 @@ export default function MySubmissionsModal({ user, isAdmin, onClose, onChanged }
         <div className="p-5 space-y-4">
           {error && <p role="alert" className="text-sm text-accent-dark bg-accent-soft border-2 border-accent px-3 py-2">{error}</p>}
           {!items && !error && <p className="text-sm text-mute">Loading…</p>}
+
+          {requests.length > 0 && (
+            <section className="space-y-2" aria-label="Address requests">
+              <h3 className="text-sm uppercase tracking-widest">Address requests ({requests.filter(r => r.status === 'pending').length} waiting)</h3>
+              {requests.map(r => (
+                <div key={r.id} className="border-2 border-ink bg-white p-3 text-sm space-y-2">
+                  <p className="font-bold">{r.venueName} <span className="font-normal text-mute">· {new Date(r.createdAt).toLocaleDateString()}</span></p>
+                  <p>“{r.note}”</p>
+                  {r.status === 'pending' ? (
+                    <div className="flex gap-2">
+                      <button className="btn btn-primary" disabled={busyReq === r.id} onClick={() => decide(r.id, 'approved')}>Approve</button>
+                      <button className="btn" disabled={busyReq === r.id} onClick={() => decide(r.id, 'declined')}>Decline</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-extrabold uppercase tracking-wider">{r.status === 'approved' ? 'Approved' : 'Declined'}</span>
+                      <button className="btn" disabled={busyReq === r.id} onClick={() => decide(r.id, r.status === 'approved' ? 'declined' : 'approved')}>
+                        {r.status === 'approved' ? 'Revoke' : 'Approve after all'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
           {items && items.length === 0 && <p className="text-sm">You haven’t submitted any open mics yet. Use “+ Add an open mic” to add one.</p>}
           {items?.map(m => {
             const st = STATUS[m.status]

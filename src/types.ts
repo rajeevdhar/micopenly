@@ -25,7 +25,27 @@ export interface Venue {
   timezone: string            // IANA, e.g. "America/New_York"
   websiteUrl?: string
   instagramUrl?: string
+  /** True when the exact address is private: address/lat/lng here are a placeholder and a town-level pin. */
+  locationHidden: boolean
   status: ListingStatus
+  createdAt: string
+}
+
+export type RequestStatus = 'pending' | 'approved' | 'declined'
+
+/** The real address of a hidden venue. Only the host, admins and approved guests can load it. */
+export interface VenuePrivate {
+  address: string
+  postalCode?: string
+  lat: number
+  lng: number
+}
+
+export interface AddressRequest {
+  id: string
+  venueId: string
+  note: string
+  status: RequestStatus
   createdAt: string
 }
 
@@ -64,7 +84,7 @@ export interface OpenMicWithVenue extends OpenMic {
 // (submitted_by is deliberately NOT selected: the client never needs it.)
 export const VENUE_COLUMNS = [
   'id', 'name', 'address', 'city', 'region', 'postal_code', 'country', 'lat', 'lng',
-  'timezone', 'website_url', 'instagram_url', 'status', 'created_at',
+  'timezone', 'website_url', 'instagram_url', 'location_hidden', 'status', 'created_at',
 ].join(', ')
 
 export const OPEN_MIC_COLUMNS = [
@@ -85,8 +105,13 @@ export function rowToVenue(r: any): Venue {
     region: r.region ?? undefined, postalCode: r.postal_code ?? undefined,
     country: r.country, lat: r.lat, lng: r.lng, timezone: r.timezone,
     websiteUrl: r.website_url ?? undefined, instagramUrl: r.instagram_url ?? undefined,
+    locationHidden: r.location_hidden === true,
     status: r.status, createdAt: r.created_at,
   }
+}
+
+export function rowToAddressRequest(r: any): AddressRequest {
+  return { id: r.id, venueId: r.venue_id, note: r.note, status: r.status, createdAt: r.created_at }
 }
 
 export function rowToOpenMic(r: any): OpenMic {

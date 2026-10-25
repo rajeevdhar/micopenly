@@ -7,6 +7,7 @@ import {
 import { REPORT_OPTIONS, type OpenMicWithVenue } from '../types'
 import OpenMicCard from './OpenMicCard'
 import SubmitModal from './SubmitModal'
+import { PrivateAddressNote } from './AddressAccess'
 
 type Tab = 'pending' | 'reports'
 
@@ -81,6 +82,7 @@ export default function AdminPanel({ user, initialTab = 'pending', onClose, onCh
                     {m.venue.status === 'pending' ? 'New venue; approving this adds it to the map. ' : ''}
                     {m.venue.lat.toFixed(4)}, {m.venue.lng.toFixed(4)} · time zone {m.venue.timezone}
                   </p>
+                  {m.venue.locationHidden && <PrivateAddressNote venueId={m.venueId} />}
                   <div className="flex flex-wrap gap-2">
                     <button className="btn btn-primary" disabled={busyId === m.id} onClick={() => act(m.id, () => approveMic(m))}>Approve</button>
                     <button className="btn" disabled={busyId === m.id} onClick={() => setEditing(m)}>Edit first</button>

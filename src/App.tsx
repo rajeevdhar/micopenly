@@ -10,7 +10,7 @@ import AdminPanel from './components/AdminPanel'
 import ListingActions from './components/ListingActions'
 import ReportModal from './components/ReportModal'
 import MySubmissionsModal from './components/MySubmissionsModal'
-import { countOpenReports, countPending, fetchApprovedVenues } from './lib/api'
+import { countIncomingRequests, countOpenReports, countPending, fetchApprovedVenues } from './lib/api'
 import type { OpenMicWithVenue, Venue } from './types'
 
 export default function App() {
@@ -27,6 +27,7 @@ export default function App() {
   const [venues, setVenues] = useState<Venue[]>([])
   const [pending, setPending] = useState(0)
   const [reportCount, setReportCount] = useState(0)
+  const [incoming, setIncoming] = useState(0)
   const [flash, setFlash] = useState('')
 
   const notify = (message: string) => {
@@ -34,11 +35,12 @@ export default function App() {
     window.setTimeout(() => setFlash(f => (f === message ? '' : f)), 4000)
   }
   const refreshCounts = () => {
+    if (user && !isAdmin) void countIncomingRequests(user.id).then(setIncoming)
     if (!isAdmin) return
     void countPending().then(setPending)
     void countOpenReports().then(setReportCount)
   }
-  useEffect(() => { refreshCounts() }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshCounts() }, [isAdmin, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const attention = pending + reportCount
 
   const openSubmit = async () => {
@@ -68,6 +70,7 @@ export default function App() {
           {user && (
             <button className="text-sm font-bold border-2 border-white/40 text-white px-3 h-9" onClick={() => setShowMine(true)}>
               <span className="sm:hidden">Mine</span><span className="hidden sm:inline">My submissions</span>
+              {!isAdmin && incoming > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{incoming}<span className="sr-only"> address requests waiting</span></span>}
             </button>
           )}
           {isAdmin && (

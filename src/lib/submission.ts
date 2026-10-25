@@ -17,6 +17,8 @@ export interface VenueDraft {
   timezone: string
   websiteUrl: string
   instagramUrl: string
+  /** Keep the exact address private; the public map shows only the town. */
+  locationHidden: boolean
 }
 
 export interface MicDraft {
@@ -40,7 +42,7 @@ export interface MicDraft {
 
 export const EMPTY_VENUE: VenueDraft = {
   existingVenueId: null, name: '', address: '', city: '', region: '', postalCode: '',
-  lat: null, lng: null, timezone: 'America/New_York', websiteUrl: '', instagramUrl: '',
+  lat: null, lng: null, timezone: 'America/New_York', websiteUrl: '', instagramUrl: '', locationHidden: false,
 }
 
 export const EMPTY_MIC: MicDraft = {
@@ -128,25 +130,53 @@ export function validate(v: VenueDraft, m: MicDraft): Errors {
 
 const orNull = (s: string): string | null => (s.trim() ? s.trim() : null)
 
+/** What the public row says instead of a street address when the location is hidden. Must match the database check. */
+export const HIDDEN_ADDRESS = 'Address shared on request'
+
+/** Round a coordinate to 2 decimals (~1 km). The database enforces the same for hidden venues. */
+export const roundCoord = (n: number): number => Number(n.toFixed(2))
+
+/**
+ * The map point the PUBLIC sees. Visible venues: the exact pin. Hidden venues: the centre of the
+ * town (when we could look it up), otherwise the pin snapped to 0.1 degree (~11 km). Always rounded to 2 decimals.
+ */
+export function publicPoint(v: VenueDraft, town: { lat: number; lng: number } | null): { lat: number; lng: number } {
+  if (!v.locationHidden) return { lat: v.lat as number, lng: v.lng as number }
+  if (town) return { lat: roundCoord(town.lat), lng: roundCoord(town.lng) }
+  return { lat: roundCoord(Number((v.lat as number).toFixed(1))), lng: roundCoord(Number((v.lng as number).toFixed(1))) }
+}
+
 /** The editable venue columns (no status / owner), shared by create and edit. */
-export function venueFields(v: VenueDraft) {
+export function venueFields(v: VenueDraft, town: { lat: number; lng: number } | null = null) {
+  const pt = publicPoint(v, town)
   return {
     name: v.name.trim(),
-    address: v.address.trim(),
+    address: v.locationHidden ? HIDDEN_ADDRESS : v.address.trim(),
     city: v.city.trim(),
     region: orNull(v.region),
-    postal_code: orNull(v.postalCode),
+    postal_code: v.locationHidden ? null : orNull(v.postalCode),
     country: 'US',
-    lat: v.lat as number,
-    lng: v.lng as number,
+    lat: pt.lat,
+    lng: pt.lng,
     timezone: v.timezone,
     website_url: orNull(cleanUrl(v.websiteUrl) ?? ''),
     instagram_url: orNull(cleanInstagram(v.instagramUrl) ?? ''),
+    location_hidden: v.locationHidden,
   }
 }
 
-export function venueRow(v: VenueDraft, userId: string) {
-  return { ...venueFields(v), status: 'pending' as const, submitted_by: userId }
+export function venueRow(v: VenueDraft, userId: string, town: { lat: number; lng: number } | null = null) {
+  return { ...venueFields(v, town), status: 'pending' as const, submitted_by: userId }
+}
+
+/** The private half of a hidden venue: the real address and pin. Never sent to the public table. */
+export function privateFields(v: VenueDraft) {
+  return {
+    address: v.address.trim(),
+    postal_code: orNull(v.postalCode),
+    lat: v.lat as number,
+    lng: v.lng as number,
+  }
 }
 
 /** The editable open-mic columns (no venue / status / owner / verification), shared by create and edit. */
@@ -180,9 +210,13 @@ export function draftsFromMic(m: OpenMicWithVenue): { venue: VenueDraft; mic: Mi
   const v = m.venue
   return {
     venue: {
-      existingVenueId: null, name: v.name, address: v.address, city: v.city,
-      region: v.region ?? '', postalCode: v.postalCode ?? '', lat: v.lat, lng: v.lng,
+      // A hidden venue's public row holds only a placeholder and a town pin, so start blank;
+      // the form loads the real address separately (only the host or an admin can).
+      existingVenueId: null, name: v.name, address: v.locationHidden ? '' : v.address, city: v.city,
+      region: v.region ?? '', postalCode: v.postalCode ?? '',
+      lat: v.locationHidden ? null : v.lat, lng: v.locationHidden ? null : v.lng,
       timezone: v.timezone, websiteUrl: v.websiteUrl ?? '', instagramUrl: v.instagramUrl ?? '',
+      locationHidden: v.locationHidden === true,
     },
     mic: {
       title: m.title, format: m.format, genres: [...m.genres], dayOfWeek: m.dayOfWeek,
@@ -204,4 +238,12 @@ export async function geocode(query: string): Promise<{ lat: number; lng: number
   const rows = (await res.json()) as { lat: string; lon: string; display_name: string }[]
   if (!rows.length) return null
   return { lat: Number(rows[0].lat), lng: Number(rows[0].lon), label: rows[0].display_name }
+}
+
+/** Centre of the town (for the public pin of a hidden venue). Null if it can't be found. */
+export async function geocodeTown(v: Pick<VenueDraft, 'city' | 'region'>): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const hit = await geocode([v.city, v.region, 'USA'].map(s => s.trim()).filter(Boolean).join(', '))
+    return hit ? { lat: hit.lat, lng: hit.lng } : null
+  } catch { return null }
 }

@@ -44,6 +44,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   cursor: pointer;
 }
 .mo-pin.is-tonight { background: var(--c-accent); }
+.mo-pin.is-approx { border-style: dashed; }
+.mo-pin.is-approx::before { content: '≈ '; }
 .mo-pin.is-selected { outline: 3px solid var(--c-accent); z-index: 1000; }
 .mo-cluster {
   transform: translate(-50%, -50%);

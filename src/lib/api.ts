@@ -1,9 +1,11 @@
 import { supabase } from './supabase'
 import {
-  OPEN_MIC_WITH_VENUE_SELECT, OPEN_MIC_COLUMNS, VENUE_COLUMNS, rowToOpenMicWithVenue, rowToVenue,
-  type OpenMicWithVenue, type ReportKind, type Venue,
+  OPEN_MIC_WITH_VENUE_SELECT, OPEN_MIC_COLUMNS, VENUE_COLUMNS, rowToAddressRequest, rowToOpenMicWithVenue, rowToVenue,
+  type AddressRequest, type OpenMicWithVenue, type ReportKind, type RequestStatus, type Venue, type VenuePrivate,
 } from '../types'
-import { micFields, micRow, venueFields, venueRow, type MicDraft, type VenueDraft } from './submission'
+import {
+  geocodeTown, micFields, micRow, privateFields, venueFields, venueRow, type MicDraft, type VenueDraft,
+} from './submission'
 
 export interface Result { error: string | null }
 
@@ -17,9 +19,16 @@ function friendly(message: string, code?: string, duplicate = 'That open mic is 
 export async function submitOpenMic(userId: string, venue: VenueDraft, mic: MicDraft): Promise<Result> {
   let venueId = venue.existingVenueId
   if (!venueId) {
-    const { data, error } = await supabase.from('venues').insert(venueRow(venue, userId)).select('id').single()
+    const town = venue.locationHidden ? await geocodeTown(venue) : null
+    const { data, error } = await supabase.from('venues').insert(venueRow(venue, userId, town)).select('id').single()
     if (error || !data) return { error: friendly(error?.message ?? 'Could not save the venue.', error?.code) }
     venueId = data.id as string
+    if (venue.locationHidden) {
+      const p = await supabase.from('venue_private').insert({ venue_id: venueId, ...privateFields(venue) })
+      if (p.error) {
+        return { error: `The venue was saved, but its private address wasn’t (${friendly(p.error.message, p.error.code)}). Open “My submissions” and edit it to add the address.` }
+      }
+    }
   }
   const { error } = await supabase.from('open_mics').insert(micRow(mic, venueId, userId))
   if (error) {
@@ -55,6 +64,10 @@ export async function fetchPending(): Promise<{ data: PendingBundle | null; erro
 
 /** Approve a pending open mic (and its venue if that is still pending). */
 export async function approveMic(m: OpenMicWithVenue): Promise<Result> {
+  if (m.venue.locationHidden && m.venue.status === 'pending') {
+    const { data } = await supabase.from('venue_private').select('venue_id').eq('venue_id', m.venueId)
+    if (!data?.length) return { error: 'This venue hides its address but none is on file. Use “Edit first” to add it.' }
+  }
   if (m.venue.status === 'pending') {
     const { error } = await supabase.from('venues').update({ status: 'approved' }).eq('id', m.venueId)
     if (error) return { error: friendly(error.message, error.code) }
@@ -82,7 +95,8 @@ export async function setVenueStatus(id: string, status: 'approved' | 'rejected'
 }
 
 export async function fetchApprovedVenues(): Promise<Venue[]> {
-  const { data } = await supabase.from('venues').select(VENUE_COLUMNS).eq('status', 'approved').order('name')
+  // Venues with a hidden address are left out: adding nights to someone else's private venue isn't offered.
+  const { data } = await supabase.from('venues').select(VENUE_COLUMNS).eq('status', 'approved').eq('location_hidden', false).order('name')
   return (data ?? []).map(rowToVenue)
 }
 
@@ -120,9 +134,19 @@ export async function fetchMine(userId: string): Promise<{ data: OpenMicWithVenu
  */
 export async function updateListing(mic: OpenMicWithVenue, venue: VenueDraft | null, draft: MicDraft): Promise<Result> {
   if (venue) {
-    const v = await supabase.from('venues').update(venueFields(venue)).eq('id', mic.venueId).select('id')
+    // Keep the public pin where it is unless the venue is hidden and its town changed.
+    const town = venue.locationHidden ? await geocodeTown(venue) : null
+    const v = await supabase.from('venues').update(venueFields(venue, town)).eq('id', mic.venueId).select('id')
     if (v.error) return { error: friendly(v.error.message, v.error.code) }
     if (!v.data?.length) return { error: 'The venue couldn’t be changed. It may already have been reviewed.' }
+    if (venue.locationHidden) {
+      const p = await supabase.from('venue_private').upsert({ venue_id: mic.venueId, ...privateFields(venue) }).select('venue_id')
+      if (p.error) return { error: friendly(p.error.message, p.error.code) }
+      if (!p.data?.length) return { error: 'The private address couldn’t be saved.' }
+    } else {
+      const d = await supabase.from('venue_private').delete().eq('venue_id', mic.venueId)
+      if (d.error) return { error: friendly(d.error.message, d.error.code) }
+    }
   }
   const m = await supabase.from('open_mics').update(micFields(draft)).eq('id', mic.id).select('id')
   if (m.error) return { error: friendly(m.error.message, m.error.code) }
@@ -164,6 +188,57 @@ export async function resolveReport(id: string, adminId: string, status: 'resolv
 /** Admin: take a listing off the map (reversible, the row is kept). */
 export async function setMicStatus(id: string, status: 'closed' | 'approved'): Promise<Result> {
   const { data, error } = await supabase.from('open_mics').update({ status }).eq('id', id).select('id')
+  if (error) return { error: friendly(error.message, error.code) }
+  return { error: data?.length ? null : 'That change wasn’t saved.' }
+}
+
+// ── Hidden addresses: private address and requests ──
+
+/** The real address. Returns null unless you're the host, an admin, or an approved guest. */
+export async function fetchVenuePrivate(venueId: string): Promise<VenuePrivate | null> {
+  const { data } = await supabase.from('venue_private').select('address, postal_code, lat, lng').eq('venue_id', venueId).maybeSingle()
+  if (!data) return null
+  return { address: data.address, postalCode: data.postal_code ?? undefined, lat: data.lat, lng: data.lng }
+}
+
+export async function requestAddress(userId: string, venueId: string, note: string): Promise<Result> {
+  const { error } = await supabase.from('address_requests').insert({ venue_id: venueId, requester_id: userId, note: note.trim() })
+  return { error: error ? friendly(error.message, error.code, 'You’ve already asked for this address.') : null }
+}
+
+/** My own request for a venue, if any. */
+export async function fetchMyRequest(userId: string, venueId: string): Promise<AddressRequest | null> {
+  const { data } = await supabase
+    .from('address_requests').select('id, venue_id, note, status, created_at')
+    .eq('venue_id', venueId).eq('requester_id', userId).maybeSingle()
+  return data ? rowToAddressRequest(data) : null
+}
+
+export interface IncomingRequest extends AddressRequest { venueName: string }
+
+/** Requests from other people for venues I host. Pass my hidden venue ids. */
+export async function fetchIncomingRequests(venueIds: string[]): Promise<{ data: IncomingRequest[]; error: string | null }> {
+  if (!venueIds.length) return { data: [], error: null }
+  const { data, error } = await supabase
+    .from('address_requests')
+    .select('id, venue_id, note, status, created_at, venue:venues(name)')
+    .in('venue_id', venueIds)
+    .order('created_at', { ascending: false })
+  if (error) return { data: [], error: error.message }
+  const rows = (data ?? []) as unknown as { venue: { name: string } | null }[]
+  return { data: rows.map(r => ({ ...rowToAddressRequest(r), venueName: r.venue?.name ?? 'Your venue' })), error: null }
+}
+
+/** How many requests from other people are waiting on me. Admins are skipped (they see everyone's). */
+export async function countIncomingRequests(userId: string): Promise<number> {
+  const { count } = await supabase
+    .from('address_requests').select('id', { count: 'exact', head: true })
+    .eq('status', 'pending').neq('requester_id', userId)
+  return count ?? 0
+}
+
+export async function decideRequest(id: string, status: Exclude<RequestStatus, 'pending'>): Promise<Result> {
+  const { data, error } = await supabase.from('address_requests').update({ status }).eq('id', id).select('id')
   if (error) return { error: friendly(error.message, error.code) }
   return { error: data?.length ? null : 'That change wasn’t saved.' }
 }

@@ -8,7 +8,7 @@ import {
   EMPTY_MIC, EMPTY_VENUE, TIMEZONES, draftsFromMic, geocode, guessTimezone, validate,
   type Errors, type MicDraft, type VenueDraft,
 } from '../lib/submission'
-import { submitOpenMic, updateListing } from '../lib/api'
+import { fetchVenuePrivate, submitOpenMic, updateListing } from '../lib/api'
 import type { OpenMicWithVenue } from '../types'
 import PinPicker from './PinPicker'
 
@@ -49,6 +49,19 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
   const [busy, setBusy] = useState(false)
   const [serverError, setServerError] = useState('')
   const [done, setDone] = useState(false)
+
+  // Editing a hidden venue: its real address lives in a private table, so load it for the form.
+  const [privLoading, setPrivLoading] = useState(!!editing && editing.venueEditable && editing.mic.venue.locationHidden)
+  useEffect(() => {
+    if (!privLoading || !editing) return
+    let live = true
+    void fetchVenuePrivate(editing.mic.venueId).then(p => {
+      if (!live) return
+      if (p) setVenue(v => ({ ...v, address: p.address, postalCode: p.postalCode ?? '', lat: p.lat, lng: p.lng }))
+      setPrivLoading(false)
+    })
+    return () => { live = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sortedVenues = useMemo(() => [...venues].sort((a, b) => a.name.localeCompare(b.name)), [venues])
   const setV = (p: Partial<VenueDraft>) => setVenue(v => ({ ...v, ...p }))
@@ -138,7 +151,7 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
             {editing && !editing.venueEditable && (
               <p className="text-sm border-2 border-line bg-white p-3">
                 <strong>{editing.mic.venue.name}</strong><br />
-                <span className="text-mute">{editing.mic.venue.address}, {editing.mic.venue.city}. The venue is already approved; to change it, use “Report a problem”.</span>
+                <span className="text-mute">{editing.mic.venue.locationHidden ? `${editing.mic.venue.city} (exact address private)` : `${editing.mic.venue.address}, ${editing.mic.venue.city}`}. The venue is already approved; to change it, use “Report a problem”.</span>
               </p>
             )}
             {!editing && <Field label="Which venue?" htmlFor="venue-pick">
@@ -154,7 +167,19 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
                 <Field label="Venue name" error={errors.venueName} htmlFor="v-name">
                   <input id="v-name" className="field" value={venue.name} maxLength={120} onChange={e => setV({ name: e.target.value })} />
                 </Field>
-                <Field label="Street address" error={errors.address} htmlFor="v-addr">
+                <div className="border-2 border-line bg-white p-3">
+                  <label className="flex items-start gap-2 text-sm font-bold cursor-pointer">
+                    <input type="checkbox" className="mt-1" checked={venue.locationHidden} onChange={e => setV({ locationHidden: e.target.checked })} />
+                    <span>Keep the exact address private</span>
+                  </label>
+                  <p className="text-xs text-mute mt-1 ml-6">
+                    {venue.locationHidden
+                      ? 'The public map shows only the town, with “≈” on the pin. People ask for the address; you approve them (you’ll see requests under My submissions). Don’t put the street in the venue name or notes.'
+                      : 'Use this for house shows or rooms where you vet people first. Otherwise the street address is public.'}
+                  </p>
+                </div>
+                {privLoading && <p className="text-xs text-mute">Loading the private address…</p>}
+                <Field label={venue.locationHidden ? 'Exact address (kept private)' : 'Street address'} error={errors.address} htmlFor="v-addr">
                   <input id="v-addr" className="field" autoComplete="street-address" value={venue.address} onChange={e => setV({ address: e.target.value })} />
                 </Field>
                 <div className="grid grid-cols-[1fr_80px_110px] gap-2">
@@ -285,7 +310,7 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
           {Object.keys(errors).length > 0 && <p className="text-sm text-accent-dark font-bold">Please fix the highlighted fields.</p>}
 
           <div className="flex gap-2">
-            <button className="btn btn-primary" disabled={busy}>{busy ? (editing ? 'Saving…' : 'Submitting…') : (editing ? 'Save changes' : 'Submit for review')}</button>
+            <button className="btn btn-primary" disabled={busy || privLoading}>{busy ? (editing ? 'Saving…' : 'Submitting…') : (editing ? 'Save changes' : 'Submit for review')}</button>
             <button type="button" className="btn" onClick={() => onClose(false)}>Cancel</button>
           </div>
         </form>

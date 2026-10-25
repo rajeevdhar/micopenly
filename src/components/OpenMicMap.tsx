@@ -9,8 +9,8 @@ import { groupByVenue } from '../store'
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-function pinIcon(name: string, selected: boolean, tonight: boolean) {
-  const cls = ['mo-pin', selected && 'is-selected', tonight && 'is-tonight'].filter(Boolean).join(' ')
+function pinIcon(name: string, selected: boolean, tonight: boolean, approx: boolean) {
+  const cls = ['mo-pin', selected && 'is-selected', tonight && 'is-tonight', approx && 'is-approx'].filter(Boolean).join(' ')
   return new L.DivIcon({
     className: '',
     html: `<div class="${cls}">${esc(name.length > 22 ? name.slice(0, 21) + '…' : name)}</div>`,
@@ -42,10 +42,10 @@ function Markers({ mics, selectedVenueId, onSelect }: {
       const venue = list[0].venue
       const tonight = list.some(m => isTonight(m, m.venue.timezone))
       const marker = L.marker([venue.lat, venue.lng], {
-        icon: pinIcon(venue.name, venueId === selectedVenueId, tonight),
+        icon: pinIcon(venue.name, venueId === selectedVenueId, tonight, venue.locationHidden),
         zIndexOffset: venueId === selectedVenueId ? 1000 : 0,
         keyboard: true,
-        title: venue.name,
+        title: venue.locationHidden ? `${venue.name} (approximate location)` : venue.name,
       })
       marker.on('click', (e: L.LeafletMouseEvent) => {
         e.originalEvent.stopPropagation()

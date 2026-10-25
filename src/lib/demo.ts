@@ -3,7 +3,7 @@ import type { OpenMicWithVenue, Venue } from '../types'
 // Sample listings for local UI work ONLY (VITE_DEMO_DATA=1 in a dev build).
 // Venues and events are invented; they are never loaded in a production build.
 const v = (id: string, name: string, city: string, lat: number, lng: number): Venue => ({
-  id, name, address: '1 Example St', city, region: 'NJ', country: 'US', lat, lng,
+  id, name, address: '1 Example St', city, region: 'NJ', country: 'US', locationHidden: false, lat, lng,
   timezone: 'America/New_York', status: 'approved', createdAt: '2026-01-01T00:00:00Z',
 })
 

@@ -65,7 +65,8 @@ export default function OpenMicCard({ mic, expanded = false, onSelect, actions, 
           {mic.houseGear && <><dt className="text-mute">Gear</dt><dd>{mic.houseGear}</dd></>}
           {mic.costNote && <><dt className="text-mute">Cost</dt><dd>{mic.costNote}</dd></>}
           <dt className="text-mute">Ages</dt><dd>{label(AGE_OPTIONS, mic.ageRestriction)}</dd>
-          <dt className="text-mute">Address</dt><dd>{mic.venue.address}, {mic.venue.city}</dd>
+          <dt className="text-mute">Address</dt>
+          <dd>{mic.venue.locationHidden ? <>Private. Shared by the host on request. Pin shows the town only.</> : <>{mic.venue.address}, {mic.venue.city}</>}</dd>
           {mic.notes && <><dt className="text-mute">Notes</dt><dd>{mic.notes}</dd></>}
           {(site || insta) && (
             <>

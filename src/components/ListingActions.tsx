@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import type { OpenMicWithVenue } from '../types'
 import { confirmMic, setMicStatus } from '../lib/api'
+import AddressAccess from './AddressAccess'
 
 /** Buttons under an expanded listing: confirm it's still running, report a problem, and admin tools. */
 export default function ListingActions({ mic, user, isAdmin, onNeedAuth, onReport, onEdit, onChanged }: {
@@ -38,6 +39,7 @@ export default function ListingActions({ mic, user, isAdmin, onNeedAuth, onRepor
 
   return (
     <div className="mt-2 space-y-2">
+      {mic.venue.locationHidden && <AddressAccess mic={mic} user={user} onNeedAuth={onNeedAuth} onChanged={onChanged} />}
       <div className="flex flex-wrap gap-2">
         <button className="btn btn-primary" disabled={busy} onClick={confirm}>✓ Still running</button>
         <button className="btn" disabled={busy} onClick={() => (user ? onReport(mic) : onNeedAuth())}>Report a problem</button>
