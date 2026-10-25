@@ -14,7 +14,7 @@ function safeUrl(u?: string): string | null {
   } catch { return null }
 }
 
-export default function OpenMicCard({ mic, expanded = false, onSelect, actions, showFreshness = true }: {
+export default function OpenMicCard({ mic, expanded = false, onSelect, actions, showFreshness = true, distance }: {
   mic: OpenMicWithVenue
   expanded?: boolean
   onSelect?: () => void
@@ -22,6 +22,8 @@ export default function OpenMicCard({ mic, expanded = false, onSelect, actions, 
   actions?: ReactNode
   /** Hide the “verified / may be out of date” line (used for listings not yet public). */
   showFreshness?: boolean
+  /** e.g. "3.2 mi", shown after the town when the visitor has shared their location. */
+  distance?: string
 }) {
   const tonight = isTonight(mic, mic.venue.timezone)
   const stale = isStale(mic.lastVerifiedAt)
@@ -42,7 +44,10 @@ export default function OpenMicCard({ mic, expanded = false, onSelect, actions, 
           {tonight && <span className="shrink-0 bg-accent text-white text-[10px] font-extrabold uppercase tracking-wider px-2 py-1">Tonight</span>}
         </div>
         <p className="mt-1 text-sm font-semibold">{mic.venue.name}</p>
-        <p className="text-sm text-mute">{mic.venue.city}{mic.venue.region ? `, ${mic.venue.region}` : ''}</p>
+        <p className="text-sm text-mute">
+          {mic.venue.city}{mic.venue.region ? `, ${mic.venue.region}` : ''}
+          {distance && <span className="font-bold text-ink"> · {mic.venue.locationHidden ? '≈ ' : ''}{distance}</span>}
+        </p>
         <p className="mt-2 text-sm font-bold">{when}</p>
       </button>
 

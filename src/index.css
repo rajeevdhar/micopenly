@@ -26,8 +26,11 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 @layer components {
   .btn { @apply inline-flex items-center justify-center h-10 px-4 text-sm font-bold border-2 border-ink bg-white hover:bg-surface transition-colors; }
   .btn-primary { @apply border-accent bg-accent text-white hover:bg-accent-dark hover:border-accent-dark; }
-  .chip { @apply h-9 px-3 text-xs font-bold border-2 border-line bg-white hover:border-ink transition-colors; }
+  .chip { @apply h-10 min-w-[44px] px-3 text-[13px] font-bold border-2 border-line bg-white hover:border-ink transition-colors; }
   .chip[aria-pressed='true'] { @apply border-ink bg-ink text-white; }
+  .chip-tonight { @apply border-accent text-accent-dark px-4; }
+  .chip-tonight[aria-pressed='true'] { @apply border-accent bg-accent text-white; }
+  .btn[aria-pressed='true'] { @apply border-ink bg-ink text-white hover:bg-ink; }
   .field { @apply w-full h-11 border-2 border-ink bg-white px-3 text-sm; }
   .label { @apply block text-[11px] font-extrabold uppercase tracking-widest text-mute mb-1; }
   .modal-backdrop { @apply fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4; }
@@ -36,6 +39,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 
 /* Map pins */
+.mo-me {
+  transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%;
+  background: #1d4ed8; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(29,78,216,.25), 0 2px 6px rgba(0,0,0,.35);
+}
 .mo-pin {
   transform: translate(-50%, -100%);
   width: max-content;

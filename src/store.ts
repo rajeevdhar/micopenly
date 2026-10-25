@@ -3,6 +3,8 @@ import type { User } from '@supabase/supabase-js'
 import { supabase, supabaseConfigured } from './lib/supabase'
 import { DEMO_MICS } from './lib/demo'
 import { isTonight, nextOccurrence, todayInTz } from './lib/schedule'
+import { AGE_MESSAGES, checkAge, type BirthDate } from './lib/age'
+import type { Point } from './lib/geo'
 import {
   OPEN_MIC_WITH_VENUE_SELECT, rowToOpenMicWithVenue,
   type DayOfWeek, type OpenMicFormat, type OpenMicWithVenue,
@@ -28,6 +30,12 @@ interface State {
   filters: Filters
   selectedVenueId: string | null
   view: 'map' | 'list'
+  /** Where the list is ordered from: soonest start, or nearest to the visitor. */
+  sort: 'soonest' | 'nearest'
+  /** The visitor's position, only after they press "Near me". Kept in memory, never sent or saved. */
+  userPos: Point | null
+  locating: boolean
+  locateError: string
 
   init: () => void
   fetchMics: () => Promise<void>
@@ -35,8 +43,10 @@ interface State {
   clearFilters: () => void
   selectVenue: (id: string | null) => void
   setView: (v: 'map' | 'list') => void
+  setSort: (s: 'soonest' | 'nearest') => void
+  locate: () => void
   login: (email: string, password: string) => Promise<string | null>
-  register: (email: string, password: string) => Promise<string | null>
+  register: (email: string, password: string, birth: BirthDate | null) => Promise<string | null>
   logout: () => Promise<void>
 }
 
@@ -52,6 +62,10 @@ export const useStore = create<State>((set, get) => ({
   filters: NO_FILTERS,
   selectedVenueId: null,
   view: 'map',
+  sort: 'soonest',
+  userPos: null,
+  locating: false,
+  locateError: '',
 
   init: () => {
     if (initialised) return
@@ -102,13 +116,35 @@ export const useStore = create<State>((set, get) => ({
   clearFilters: () => set({ filters: NO_FILTERS }),
   selectVenue: id => set({ selectedVenueId: id }),
   setView: view => set({ view }),
+  setSort: sort => set({ sort }),
+  locate: () => {
+    if (!('geolocation' in navigator)) { set({ locateError: 'Your browser can’t share a location.' }); return }
+    set({ locating: true, locateError: '' })
+    navigator.geolocation.getCurrentPosition(
+      pos => set({ userPos: { lat: pos.coords.latitude, lng: pos.coords.longitude }, sort: 'nearest', locating: false, selectedVenueId: null }),
+      err => set({
+        locating: false,
+        locateError: err.code === err.PERMISSION_DENIED
+          ? 'Location is blocked for this site. You can allow it in your browser settings, or search by town instead.'
+          : 'Couldn’t find your location. Try again, or search by town.',
+      }),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 5 * 60 * 1000 },
+    )
+  },
 
   login: async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return error ? error.message : null
   },
-  register: async (email, password) => {
-    const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } })
+  register: async (email, password, birth) => {
+    // The one place accounts are created, so the age rule is enforced here and not just in the form.
+    // Only the result of the check is recorded; the date of birth itself is never sent or stored.
+    const gate = checkAge(birth)
+    if (gate !== 'ok') return AGE_MESSAGES[gate]
+    const { error } = await supabase.auth.signUp({
+      email, password,
+      options: { emailRedirectTo: window.location.origin, data: { age_confirmed_16: true, age_confirmed_at: new Date().toISOString() } },
+    })
     return error ? error.message : null
   },
   logout: async () => { await supabase.auth.signOut() },

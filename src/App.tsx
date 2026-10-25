@@ -10,13 +10,16 @@ import AdminPanel from './components/AdminPanel'
 import ListingActions from './components/ListingActions'
 import ReportModal from './components/ReportModal'
 import MySubmissionsModal from './components/MySubmissionsModal'
+import Intro from './components/Intro'
+import { isTonight } from './lib/schedule'
+import { distanceMiles, formatMiles, sortByDistance } from './lib/geo'
 import { countIncomingRequests, countOpenReports, countPending, fetchApprovedVenues } from './lib/api'
 import type { OpenMicWithVenue, Venue } from './types'
 
 export default function App() {
   const {
     user, isAdmin, needsPasswordReset, mics, loading, error, filters, selectedVenueId, view,
-    init, fetchMics, selectVenue, setView, logout,
+    sort, userPos, init, fetchMics, selectVenue, setView, logout,
   } = useStore()
   const [showAuth, setShowAuth] = useState(false)
   const [showSubmit, setShowSubmit] = useState(false)
@@ -55,6 +58,32 @@ export default function App() {
   const byVenue = useMemo(() => groupByVenue(filtered), [filtered])
   // When a pin is selected, the list narrows to that venue's mics.
   const listed = selectedVenueId ? (byVenue.get(selectedVenueId) ?? []) : filtered
+  const nearestFirst = sort === 'nearest' && !!userPos
+  const ordered = useMemo(
+    () => (nearestFirst && userPos ? sortByDistance(listed, userPos, m => m.venue) : listed),
+    [listed, nearestFirst, userPos],
+  )
+  const filtersActive = filters.day !== null || filters.tonight || filters.format !== null || filters.query !== ''
+  // With no filters and no pin selected, split the list into "Tonight" and "Coming up" so what matters now comes first.
+  const grouped = !filtersActive && !selectedVenueId && !nearestFirst
+  const tonightList = grouped ? ordered.filter(m => isTonight(m, m.venue.timezone)) : []
+  const laterList = grouped ? ordered.filter(m => !isTonight(m, m.venue.timezone)) : ordered
+  const tonightCount = useMemo(() => mics.filter(m => isTonight(m, m.venue.timezone)).length, [mics])
+  const renderCard = (m: OpenMicWithVenue) => (
+    <OpenMicCard key={m.id} mic={m} expanded={selectedVenueId === m.venueId}
+      distance={userPos ? formatMiles(distanceMiles(userPos, m.venue)) : undefined}
+      onSelect={() => { selectVenue(m.venueId); setView('map') }}
+      actions={
+        <ListingActions
+          mic={m} user={user} isAdmin={isAdmin}
+          onNeedAuth={() => setShowAuth(true)}
+          onReport={setReporting}
+          onEdit={setAdminEditing}
+          onChanged={message => { notify(message); void fetchMics(); refreshCounts() }}
+        />
+      } />
+  )
+  const sectionLabel = 'text-[11px] font-extrabold uppercase tracking-widest text-mute px-1 pt-1'
 
   return (
     <div className="h-full flex flex-col">
@@ -63,26 +92,26 @@ export default function App() {
         <span className="hidden sm:inline text-xs text-white/60">Open mics near you</span>
         <div className="ml-auto flex items-center gap-2">
           {supabaseConfigured && (
-            <button className="text-sm font-bold bg-accent text-white px-3 h-9" onClick={() => void openSubmit()}>
+            <button className="text-sm font-bold bg-accent text-white px-3 h-11 sm:h-10" onClick={() => void openSubmit()}>
               <span className="sm:hidden">+ Add</span><span className="hidden sm:inline">+ Add an open mic</span>
             </button>
           )}
           {user && (
-            <button className="text-sm font-bold border-2 border-white/40 text-white px-3 h-9" onClick={() => setShowMine(true)}>
+            <button className="text-sm font-bold border-2 border-white/40 text-white px-3 h-11 sm:h-10" onClick={() => setShowMine(true)}>
               <span className="sm:hidden">Mine</span><span className="hidden sm:inline">My submissions</span>
               {!isAdmin && incoming > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{incoming}<span className="sr-only"> address requests waiting</span></span>}
             </button>
           )}
           {isAdmin && (
-            <button className="text-sm font-bold border-2 border-accent text-white px-3 h-9" onClick={() => setShowAdmin(true)}>
+            <button className="text-sm font-bold border-2 border-accent text-white px-3 h-11 sm:h-10" onClick={() => setShowAdmin(true)}>
               Review{attention > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{attention}</span>}
               <span className="sr-only"> submissions and reports</span>
             </button>
           )}
           {isAdmin && <span className="hidden sm:inline text-[10px] font-extrabold uppercase tracking-wider bg-accent px-2 py-1">Admin</span>}
           {user
-            ? <button className="text-sm underline" onClick={logout}>Sign out</button>
-            : supabaseConfigured && <button className="text-sm font-bold border-2 border-white px-3 h-9" onClick={() => setShowAuth(true)}>Sign in</button>}
+            ? <button className="text-sm underline min-h-11 px-1" onClick={logout}>Sign out</button>
+            : supabaseConfigured && <button className="text-sm font-bold border-2 border-white px-3 h-11 sm:h-10" onClick={() => setShowAuth(true)}>Sign in</button>}
         </div>
       </header>
 
@@ -100,8 +129,9 @@ export default function App() {
         <section className={`${view === 'list' ? 'flex' : 'hidden'} md:flex flex-col w-full md:w-[420px] md:border-r-2 border-ink bg-ground min-h-0`}>
           <FilterBar count={filtered.length} />
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {!selectedVenueId && !loading && !error && <Intro canAdd={supabaseConfigured} onAdd={() => void openSubmit()} />}
             {selectedVenueId && (
-              <button className="text-xs underline text-mute" onClick={() => selectVenue(null)}>← Show all venues</button>
+              <button className="text-sm font-bold underline min-h-11" onClick={() => selectVenue(null)}>← Show all venues</button>
             )}
             {loading && <p className="text-sm text-mute p-2">Loading open mics…</p>}
             {!loading && error === 'not-configured' && (
@@ -118,32 +148,42 @@ export default function App() {
               </div>
             )}
             {!loading && !error && mics.length === 0 && (
-              <div className="border-2 border-line bg-white p-4 text-sm">
-                <p className="font-extrabold">No open mics listed yet.</p>
-                <p className="text-mute mt-1">Be the first to add one — submissions are reviewed before they appear.</p>
+              <div className="border-2 border-line bg-white p-4 text-sm space-y-3">
+                <div>
+                  <p className="font-extrabold">No open mics listed yet.</p>
+                  <p className="text-mute mt-1">Be the first to add one. Submissions are reviewed before they appear.</p>
+                </div>
+                {supabaseConfigured && <button className="btn btn-primary" onClick={() => void openSubmit()}>+ Add the first open mic</button>}
               </div>
             )}
             {!loading && !error && mics.length > 0 && listed.length === 0 && (
-              <p className="text-sm text-mute p-2">Nothing matches those filters.</p>
+              <div className="border-2 border-line bg-white p-4 text-sm space-y-3">
+                <div>
+                  <p className="font-extrabold">{filters.tonight && !filters.query && filters.day === null && filters.format === null ? 'No open mics tonight.' : 'Nothing matches those filters.'}</p>
+                  <p className="text-mute mt-1">Try another day or type, or clear the filters to see everything.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn btn-primary" onClick={useStore.getState().clearFilters}>Show all open mics</button>
+                  {supabaseConfigured && <button className="btn" onClick={() => void openSubmit()}>Know one we’re missing?</button>}
+                </div>
+              </div>
             )}
-            {listed.map(m => (
-              <OpenMicCard key={m.id} mic={m} expanded={selectedVenueId === m.venueId}
-                onSelect={() => { selectVenue(m.venueId); setView('map') }}
-                actions={
-                  <ListingActions
-                    mic={m} user={user} isAdmin={isAdmin}
-                    onNeedAuth={() => setShowAuth(true)}
-                    onReport={setReporting}
-                    onEdit={setAdminEditing}
-                    onChanged={message => { notify(message); void fetchMics(); refreshCounts() }}
-                  />
-                } />
-            ))}
+            {grouped && tonightList.length > 0 && <h2 className={sectionLabel}>Tonight · {tonightList.length}</h2>}
+            {tonightList.map(renderCard)}
+            {grouped && tonightList.length > 0 && laterList.length > 0 && <h2 className={`${sectionLabel} pt-3`}>Coming up</h2>}
+            {laterList.map(renderCard)}
           </div>
         </section>
 
         <section className={`${view === 'map' ? 'block' : 'hidden'} md:block flex-1 relative min-w-0`}>
           <OpenMicMap mics={filtered} selectedVenueId={selectedVenueId} onSelect={selectVenue} />
+          {view === 'map' && !loading && !error && mics.length > 0 && (
+            <button onClick={() => setView('list')}
+              className="md:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-[1100] bg-ink text-white text-sm font-bold h-11 px-5 shadow-lg whitespace-nowrap">
+              {tonightCount > 0 && <span className="text-accent-soft">{tonightCount} tonight · </span>}
+              {filtered.length} open mic{filtered.length === 1 ? '' : 's'} · See list
+            </button>
+          )}
         </section>
       </main>
 

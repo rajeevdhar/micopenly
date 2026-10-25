@@ -6,15 +6,23 @@ import type { OpenMicWithVenue } from '../types'
 import { isTonight } from '../lib/schedule'
 import { groupByVenue } from '../store'
 import { spreadOverlaps } from '../lib/spread'
+import { distanceMiles } from '../lib/geo'
+import { useStore } from '../store'
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/** Pins carry a short label so a crowded map stays readable; the selected pin shows the full name. */
+const pinLabel = (name: string, selected: boolean) => {
+  const max = selected ? 44 : 26
+  return name.length > max ? name.slice(0, max - 1) + '…' : name
+}
 
 function pinIcon(name: string, selected: boolean, tonight: boolean, approx: boolean) {
   const cls = ['mo-pin', selected && 'is-selected', tonight && 'is-tonight', approx && 'is-approx'].filter(Boolean).join(' ')
   return new L.DivIcon({
     className: '',
-    html: `<div class="${cls}">${esc(name.length > 22 ? name.slice(0, 21) + '…' : name)}</div>`,
+    html: `<div class="${cls}">${esc(pinLabel(name, selected))}</div>`,
     iconSize: [0, 0],
     iconAnchor: [0, 0],
   })
@@ -88,6 +96,25 @@ function FlyToSelected({ mics, selectedVenueId }: { mics: OpenMicWithVenue[]; se
   return null
 }
 
+/** When the visitor shares their location: show a dot for them and frame it with the closest few venues. */
+function ShowUser({ mics }: { mics: OpenMicWithVenue[] }) {
+  const map = useMap()
+  const userPos = useStore(s => s.userPos)
+  useEffect(() => {
+    if (!userPos) return
+    const dot = L.marker([userPos.lat, userPos.lng], {
+      icon: new L.DivIcon({ className: '', html: '<div class="mo-me"></div>', iconSize: [0, 0], iconAnchor: [0, 0] }),
+      interactive: false, keyboard: false, zIndexOffset: 2000,
+    }).addTo(map)
+    const nearest = [...new Map(mics.map(m => [m.venueId, m.venue])).values()]
+      .sort((a, b) => distanceMiles(userPos, a) - distanceMiles(userPos, b)).slice(0, 3)
+    const bounds = L.latLngBounds([[userPos.lat, userPos.lng], ...nearest.map(v => [v.lat, v.lng] as [number, number])])
+    map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 12, duration: 0.8 })
+    return () => { dot.remove() }
+  }, [userPos]) // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
 function Deselect({ onSelect }: { onSelect: (id: string | null) => void }) {
   useMapEvents({ click: () => onSelect(null) })
   return null
@@ -107,6 +134,7 @@ export default function OpenMicMap({ mics, selectedVenueId, onSelect }: {
       />
       <Markers mics={mics} selectedVenueId={selectedVenueId} onSelect={onSelect} />
       <FlyToSelected mics={mics} selectedVenueId={selectedVenueId} />
+      <ShowUser mics={mics} />
       <Deselect onSelect={onSelect} />
     </MapContainer>
   )
