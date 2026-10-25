@@ -16,9 +16,19 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const REPORT_LABEL = { closed: 'No longer running', moved: 'Moved', wrong_time: 'Wrong day or time', wrong_info: 'Wrong info', spam: 'Spam', other: 'Other' }
 const hhmm = t => { const [h, m] = String(t).split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
 
+// Keys never contain spaces, line breaks or quotes. A value pasted wrapped over two lines (or with stray
+// quotes) would otherwise be rejected by fetch as an invalid header, so strip anything that isn't printable ASCII.
+export const secret = s => String(s ?? '').replace(/[^\x21-\x7e]/g, '').replace(/^["'`]+|["'`]+$/g, '')
+
+// Error text can echo a header value back. Never let a key reach the logs.
+export const redact = s => String(s ?? '')
+  .replace(/sb_secret_[\s\S]*?(?=["']|$)/g, 'sb_secret_[hidden]')
+  .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[jwt hidden]')
+  .replace(/\bre_[A-Za-z0-9_]{8,}/g, 're_[hidden]')
+
 export function readConfig(env = process.env) {
   const url = (env.SUPABASE_URL || env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || ''
+  const serviceKey = secret(env.SUPABASE_SERVICE_ROLE_KEY)
   const mailReady = !!(env.RESEND_API_KEY || env.SMTP_URL) && !!env.MAIL_FROM
   return {
     url, serviceKey, mailReady,
@@ -26,7 +36,7 @@ export function readConfig(env = process.env) {
     from: env.MAIL_FROM || '',
     adminEmails: (env.ADMIN_EMAIL || '').split(',').map(s => s.trim()).filter(Boolean),
     siteUrl: (env.SITE_URL || 'https://micopenly-production.up.railway.app').replace(/\/$/, ''),
-    resendKey: env.RESEND_API_KEY || '',
+    resendKey: secret(env.RESEND_API_KEY),
     smtpUrl: env.SMTP_URL || '',
     intervalMs: Number(env.NOTIFY_INTERVAL_MS) || 120000,
   }
@@ -92,7 +102,7 @@ export async function runOnce(cfg, { fetchImpl = fetch, send = makeSender(cfg, f
   const summary = { adminEmails: 0, hostEmails: 0, errors: 0 }
   if (!cfg.enabled || !send) return { ...summary, skipped: true }
   const db = api(cfg, fetchImpl)
-  const attempt = async (what, fn) => { try { await fn() } catch (e) { summary.errors++; log.error?.(`[notify] ${what}: ${e.message}`) } }
+  const attempt = async (what, fn) => { try { await fn() } catch (e) { summary.errors++; log.error?.(`[notify] ${what}: ${redact(e.message)}`) } }
 
   // ── Admin digest: new submissions + new problem reports ──
   await attempt('admin digest', async () => {
@@ -180,7 +190,7 @@ export function startNotifier(env = process.env, log = console) {
     if (running) return
     running = true
     try { const s = await runOnce(cfg, { log }); if (s.adminEmails || s.hostEmails) log.log(`[notify] sent admin:${s.adminEmails} host:${s.hostEmails}`) }
-    catch (e) { log.error(`[notify] ${e.message}`) }
+    catch (e) { log.error(`[notify] ${redact(e.message)}`) }
     finally { running = false }
   }
   log.log(`[notify] email alerts on, every ${Math.round(cfg.intervalMs / 1000)}s`)

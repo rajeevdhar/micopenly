@@ -1,5 +1,5 @@
 // Email alerts: who gets told what, never twice, and nothing sensitive in the message.
-import { readConfig, runOnce } from '../server/notify.js'
+import { readConfig, runOnce, redact } from '../server/notify.js'
 
 let pass = 0, fail = 0
 const ok = (name, c, extra = '') => { c ? pass++ : (fail++, console.log(`FAIL ${name} ${extra}`)) }
@@ -136,6 +136,24 @@ const cfg = readConfig(env)
   w2.fetch = async (url, opts = {}) => { if (new URL(url).host.endsWith('supabase.co')) seen2.push(opts.headers); return inner2(url, opts) }
   await run(cfg, w2)
   ok('a legacy JWT key is still sent as both apikey and Bearer', seen2.length > 0 && seen2.every(h => h.apikey === KEY && h.Authorization === `Bearer ${KEY}`))
+}
+
+// ── A key pasted wrapped over two lines, or with quotes/spaces, still works; keys never reach the logs ──
+{
+  const mangled = readConfig({ ...env, SUPABASE_SERVICE_ROLE_KEY: '  "sb_secret_Abc123\nDef456_x-y"  \r\n', RESEND_API_KEY: ' re_abc\n123456789 ' })
+  ok('line breaks, spaces and quotes are stripped from the service key', mangled.serviceKey === 'sb_secret_Abc123Def456_x-y', JSON.stringify(mangled.serviceKey))
+  ok('the mail key is cleaned the same way', mangled.resendKey === 're_abc123456789', JSON.stringify(mangled.resendKey))
+  ok('a key with a line break is still recognised as sb_secret_ (apikey only)', mangled.serviceKey.startsWith('sb_secret_'))
+  const msg = 'Headers.append: "sb_secret_SecTF\nAMibPvvS2JYTTSbSQ_ZO_PLjcl" is an invalid header value.'
+  const out = redact(msg)
+  ok('redact hides an sb_secret_ key, even one broken across lines', !/SecTF|AMib/.test(out) && /hidden/.test(out), out)
+  ok('redact hides legacy JWTs and Resend keys', !/eyJ/.test(redact('x eyJhbGciOi.eyJyb2xlIjoic2Vydmlj.c2lnbmF0dXJl y')) && !/re_abcdefgh/.test(redact('key re_abcdefgh1234')))
+  ok('redact leaves ordinary messages alone', redact('GET /rest/v1/open_mics 401') === 'GET /rest/v1/open_mics 401')
+  const logged = []
+  const w = world(); w.mics = [mic('m1', 'Thursday Songs')]
+  w.fetch = async () => { throw new Error('Headers.append: "sb_secret_LeakyKey\nMore" is an invalid header value.') }
+  await runOnce(cfg, { fetchImpl: w.fetch, send: async () => {}, log: { log() {}, error: m => logged.push(m) } }).catch(() => {})
+  ok('errors written to the log never contain the key', logged.length > 0 && logged.every(l => !/LeakyKey|More/.test(l)), logged.join(' | '))
 }
 
 // ── The worker is separate from the public web server ──
