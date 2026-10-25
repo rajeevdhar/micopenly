@@ -32,6 +32,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .label { @apply block text-[11px] font-extrabold uppercase tracking-widest text-mute mb-1; }
   .modal-backdrop { @apply fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4; }
   .modal-box { @apply w-full max-w-sm bg-ground border-2 border-ink shadow-xl; }
+  .modal-wide { @apply max-w-2xl max-h-[92vh] overflow-y-auto; }
 }
 
 /* Map pins */

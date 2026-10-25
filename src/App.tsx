@@ -5,6 +5,10 @@ import OpenMicMap from './components/OpenMicMap'
 import OpenMicCard from './components/OpenMicCard'
 import FilterBar from './components/FilterBar'
 import AuthModal from './components/AuthModal'
+import SubmitModal from './components/SubmitModal'
+import AdminPanel from './components/AdminPanel'
+import { countPending, fetchApprovedVenues } from './lib/api'
+import type { Venue } from './types'
 
 export default function App() {
   const {
@@ -12,6 +16,20 @@ export default function App() {
     init, fetchMics, selectVenue, setView, logout,
   } = useStore()
   const [showAuth, setShowAuth] = useState(false)
+  const [showSubmit, setShowSubmit] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [venues, setVenues] = useState<Venue[]>([])
+  const [pending, setPending] = useState(0)
+  const [flash, setFlash] = useState('')
+
+  const refreshPending = () => { if (isAdmin) void countPending().then(setPending) }
+  useEffect(() => { refreshPending() }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openSubmit = async () => {
+    if (!user) { setShowAuth(true); return }
+    setVenues(await fetchApprovedVenues())
+    setShowSubmit(true)
+  }
 
   useEffect(() => { init() }, [init])
 
@@ -26,7 +44,18 @@ export default function App() {
         <h1 className="text-lg tracking-tight">Mic<span className="text-accent">Openly</span></h1>
         <span className="hidden sm:inline text-xs text-white/60">Open mics near you</span>
         <div className="ml-auto flex items-center gap-2">
-          {isAdmin && <span className="text-[10px] font-extrabold uppercase tracking-wider bg-accent px-2 py-1">Admin</span>}
+          {supabaseConfigured && (
+            <button className="text-sm font-bold bg-accent text-white px-3 h-9" onClick={() => void openSubmit()}>
+              <span className="sm:hidden">+ Add</span><span className="hidden sm:inline">+ Add an open mic</span>
+            </button>
+          )}
+          {isAdmin && (
+            <button className="text-sm font-bold border-2 border-accent text-white px-3 h-9" onClick={() => setShowAdmin(true)}>
+              Review{pending > 0 && <span className="ml-1.5 bg-accent px-1.5 text-xs">{pending}</span>}
+              <span className="sr-only"> submissions</span>
+            </button>
+          )}
+          {isAdmin && <span className="hidden sm:inline text-[10px] font-extrabold uppercase tracking-wider bg-accent px-2 py-1">Admin</span>}
           {user
             ? <button className="text-sm underline" onClick={logout}>Sign out</button>
             : supabaseConfigured && <button className="text-sm font-bold border-2 border-white px-3 h-9" onClick={() => setShowAuth(true)}>Sign in</button>}
@@ -84,6 +113,20 @@ export default function App() {
           <OpenMicMap mics={filtered} selectedVenueId={selectedVenueId} onSelect={selectVenue} />
         </section>
       </main>
+
+      {flash && (
+        <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[3000] bg-ink text-white text-sm px-4 py-2 shadow-lg">{flash}</div>
+      )}
+
+      {showSubmit && user && (
+        <SubmitModal user={user} venues={venues} onClose={submitted => {
+          setShowSubmit(false)
+          if (submitted) { setFlash('Submitted for review.'); refreshPending(); setTimeout(() => setFlash(''), 4000) }
+        }} />
+      )}
+      {showAdmin && isAdmin && (
+        <AdminPanel onClose={() => setShowAdmin(false)} onChanged={() => { refreshPending(); void fetchMics() }} />
+      )}
 
       {(showAuth || needsPasswordReset) && (
         <AuthModal initialMode={needsPasswordReset ? 'reset' : 'login'} onClose={() => setShowAuth(false)} />

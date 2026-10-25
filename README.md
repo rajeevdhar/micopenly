@@ -19,7 +19,7 @@ insert into public.admins (user_id) select id from auth.users where email = 'you
 ```
 
 ## Tests
-`npm test` runs the recurrence logic (40 checks) and the schema's access rules against a real Postgres (57 checks).
+`npm test` runs: recurrence logic (40), submit-form helpers (34), the schema's access rules on a real Postgres (57), and the submit → review → approve loop under row-level security (23).
 
 ## Rules this codebase follows
 - Nothing private in public tables. Select explicit column lists (`src/types.ts`), never `select('*')`.
@@ -27,5 +27,5 @@ insert into public.admins (user_id) select id from auth.users where email = 'you
 - "Tonight" is computed in the venue's timezone.
 
 ## Status
-Done: schema and tests, map, list, filters (tonight / day / type / search), sign-in.
-Next: submit-a-venue form, admin approval screen, confirm and report buttons.
+Done: schema and tests, map, list, filters (tonight / day / type / search), sign-in, submit form (address lookup via OpenStreetMap, draggable pin), admin review screen (approve / reject).
+Next: "still running" confirmations and problem reports, admin editing before approval, rate limiting for submissions.
