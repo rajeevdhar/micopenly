@@ -122,6 +122,22 @@ const cfg = readConfig(env)
   ok('a host with no email on file is skipped without crashing, and retried later', w.outbox.length === 0 && w.sent.length === 0 && s.errors === 0)
 }
 
+// ── New-style secret keys (sb_secret_...) are sent in the apikey header only ──
+{
+  const NEWKEY = 'sb_secret_abc123'
+  const w = world(); w.mics = [mic('m1', 'Thursday Songs')]
+  const seen = []
+  const inner = w.fetch
+  w.fetch = async (url, opts = {}) => { if (new URL(url).host.endsWith('supabase.co')) seen.push(opts.headers); return inner(url, { ...opts, headers: { ...opts.headers, apikey: KEY, Authorization: `Bearer ${KEY}` } }) }
+  await run(readConfig({ ...env, SUPABASE_SERVICE_ROLE_KEY: NEWKEY }), w)
+  ok('an sb_secret_ key is sent as apikey and never as a Bearer token', seen.length > 0 && seen.every(h => h.apikey === NEWKEY && !('Authorization' in h)), JSON.stringify(seen[0]))
+  const seen2 = []
+  const w2 = world(); w2.mics = [mic('m1', 'X')]; const inner2 = w2.fetch
+  w2.fetch = async (url, opts = {}) => { if (new URL(url).host.endsWith('supabase.co')) seen2.push(opts.headers); return inner2(url, opts) }
+  await run(cfg, w2)
+  ok('a legacy JWT key is still sent as both apikey and Bearer', seen2.length > 0 && seen2.every(h => h.apikey === KEY && h.Authorization === `Bearer ${KEY}`))
+}
+
 // ── The worker is separate from the public web server ──
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'

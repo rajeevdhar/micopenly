@@ -52,7 +52,9 @@ export function makeSender(cfg, fetchImpl = fetch) {
 }
 
 function api(cfg, fetchImpl) {
-  const headers = { apikey: cfg.serviceKey, Authorization: `Bearer ${cfg.serviceKey}`, 'Content-Type': 'application/json' }
+  // Legacy service_role keys are JWTs and go in both headers. New sb_secret_ keys aren't JWTs: apikey only.
+  const headers = { apikey: cfg.serviceKey, 'Content-Type': 'application/json' }
+  if (!cfg.serviceKey.startsWith('sb_secret_')) headers.Authorization = `Bearer ${cfg.serviceKey}`
   const get = async path => {
     const res = await fetchImpl(`${cfg.url}${path}`, { headers })
     if (!res.ok) throw new Error(`GET ${path.split('?')[0]} ${res.status}`)
