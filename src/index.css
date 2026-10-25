@@ -1,0 +1,52 @@
+@import 'leaflet/dist/leaflet.css';
+@import 'leaflet.markercluster/dist/MarkerCluster.css';
+@import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-bg: #f6f2ea;
+  --c-surface: #ece6d9;
+  --c-ink: #1f1b16;
+  --c-mute: #6b6358;
+  --c-line: #cfc6b4;
+  --c-accent: #d9480f;
+  --c-accent-dark: #a63508;
+  --c-accent-soft: #ffe8d9;
+}
+
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--c-bg); color: var(--c-ink); font-family: 'Archivo', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { font-weight: 800; }
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center h-10 px-4 text-sm font-bold border-2 border-ink bg-white hover:bg-surface transition-colors; }
+  .btn-primary { @apply border-accent bg-accent text-white hover:bg-accent-dark hover:border-accent-dark; }
+  .chip { @apply h-9 px-3 text-xs font-bold border-2 border-line bg-white hover:border-ink transition-colors; }
+  .chip[aria-pressed='true'] { @apply border-ink bg-ink text-white; }
+  .field { @apply w-full h-11 border-2 border-ink bg-white px-3 text-sm; }
+  .label { @apply block text-[11px] font-extrabold uppercase tracking-widest text-mute mb-1; }
+  .modal-backdrop { @apply fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4; }
+  .modal-box { @apply w-full max-w-sm bg-ground border-2 border-ink shadow-xl; }
+}
+
+/* Map pins */
+.mo-pin {
+  transform: translate(-50%, -100%);
+  width: max-content;
+  background: var(--c-ink); color: #fff; font: 800 11px/1 'Archivo', sans-serif;
+  padding: 6px 8px; white-space: nowrap; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3);
+  cursor: pointer;
+}
+.mo-pin.is-tonight { background: var(--c-accent); }
+.mo-pin.is-selected { outline: 3px solid var(--c-accent); z-index: 1000; }
+.mo-cluster {
+  transform: translate(-50%, -50%);
+  background: var(--c-ink); color: #fff; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font: 800 13px 'Archivo', sans-serif;
+  border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
