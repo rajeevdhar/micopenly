@@ -2,8 +2,9 @@
 // Kept free of React/Supabase so they can be unit-tested (tests/test-submission.cjs).
 
 import type {
-  AgeRestriction, DayOfWeek, OpenMicFormat, OpenMicWithVenue, SignupMethod, WeekOfMonth,
+  AgeRestriction, DayOfWeek, OpenMicFormat, OpenMicWithVenue, SignupMethod, Venue, WeekOfMonth,
 } from '../types'
+import { normalizePlace } from './places'
 
 export interface VenueDraft {
   existingVenueId: string | null
@@ -149,11 +150,12 @@ export function publicPoint(v: VenueDraft, town: { lat: number; lng: number } | 
 /** The editable venue columns (no status / owner), shared by create and edit. */
 export function venueFields(v: VenueDraft, town: { lat: number; lng: number } | null = null) {
   const pt = publicPoint(v, town)
+  const place = normalizePlace(v.city, v.region)
   return {
     name: v.name.trim(),
     address: v.locationHidden ? HIDDEN_ADDRESS : v.address.trim(),
-    city: v.city.trim(),
-    region: orNull(v.region),
+    city: place.city,
+    region: orNull(place.region),
     postal_code: v.locationHidden ? null : orNull(v.postalCode),
     country: 'US',
     lat: pt.lat,
@@ -231,13 +233,33 @@ export function draftsFromMic(m: OpenMicWithVenue): { venue: VenueDraft; mic: Mi
 }
 
 /** Address → coordinates via OpenStreetMap Nominatim (free, low volume). Returns null if nothing found. */
-export async function geocode(query: string): Promise<{ lat: number; lng: number; label: string } | null> {
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`
+export async function geocode(query: string): Promise<{ lat: number; lng: number; label: string; postcode?: string } | null> {
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(query)}`
   const res = await fetch(url, { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`Address lookup failed (${res.status}).`)
-  const rows = (await res.json()) as { lat: string; lon: string; display_name: string }[]
+  const rows = (await res.json()) as { lat: string; lon: string; display_name: string; address?: { postcode?: string } }[]
   if (!rows.length) return null
-  return { lat: Number(rows[0].lat), lng: Number(rows[0].lon), label: rows[0].display_name }
+  const zip = rows[0].address?.postcode?.match(/\d{5}/)?.[0]   // first 5 digits; drops ZIP+4 and ranges
+  return { lat: Number(rows[0].lat), lng: Number(rows[0].lon), label: rows[0].display_name, postcode: zip }
+}
+
+/** Words that don't help match a venue name. */
+const nameKey = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '').replace(/^the/, '')
+
+/**
+ * Venues already on the map whose name matches what's being typed (for "is it already listed?").
+ * Case, punctuation and a leading "The" are ignored. Best matches (starts with) first, at most `limit`.
+ */
+export function suggestVenues(venues: Venue[], query: string, limit = 5): Venue[] {
+  const q = nameKey(query)
+  if (q.length < 2) return []
+  return venues
+    .filter(v => !v.locationHidden && nameKey(v.name).includes(q))
+    .sort((a, b) => {
+      const sa = nameKey(a.name).startsWith(q) ? 0 : 1, sb = nameKey(b.name).startsWith(q) ? 0 : 1
+      return sa - sb || a.name.localeCompare(b.name)
+    })
+    .slice(0, limit)
 }
 
 /** Centre of the town (for the public pin of a hidden venue). Null if it can't be found. */

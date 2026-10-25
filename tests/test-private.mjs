@@ -144,5 +144,15 @@ ok('deleting a venue removes its private address and requests',
   (await q(`select 1 from public.venue_private where venue_id='${H}'`)).length === 0
   && (await q(`select 1 from public.address_requests where venue_id='${H}'`)).length === 0)
 
+// ── Email-alert log is server-only ──
+const NS = `insert into public.notifications_sent (kind, ref_id) values ('submission', '99999999-0000-0000-0000-000000000001')`
+ok('service role can record a sent alert', (await as('service_role', null, () => code(NS))) === null)
+ok('signed-in users cannot write the alert log', (await as('authenticated', HOST, () => code(NS.replace('0001', '0002')))) !== null)
+ok('anonymous visitors cannot write the alert log', (await as('anon', null, () => code(NS.replace('0001', '0003')))) !== null)
+ok('nobody but the server can read the alert log',
+  (await count('authenticated', ADMIN, 'select 1 from public.notifications_sent')) === 0 && (await count('anon', null, 'select 1 from public.notifications_sent')) === 0
+  && (await as('service_role', null, async () => (await q('select 1 from public.notifications_sent')).length)) === 1)
+ok('alert kinds are restricted', (await code(`insert into public.notifications_sent (kind, ref_id) values ('whatever', gen_random_uuid())`)) === '23514')
+
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

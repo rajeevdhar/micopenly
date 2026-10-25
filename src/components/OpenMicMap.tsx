@@ -5,6 +5,7 @@ import 'leaflet.markercluster'
 import type { OpenMicWithVenue } from '../types'
 import { isTonight } from '../lib/schedule'
 import { groupByVenue } from '../store'
+import { spreadOverlaps } from '../lib/spread'
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -17,6 +18,12 @@ function pinIcon(name: string, selected: boolean, tonight: boolean, approx: bool
     iconSize: [0, 0],
     iconAnchor: [0, 0],
   })
+}
+
+/** Where each venue is drawn: hidden venues that share a town pin are fanned out so they don't overlap. */
+function displaySpots(mics: OpenMicWithVenue[]) {
+  const venues = [...groupByVenue(mics).values()].map(list => list[0].venue)
+  return spreadOverlaps(venues.map(v => ({ id: v.id, lat: v.lat, lng: v.lng, hidden: v.locationHidden })))
 }
 
 function Markers({ mics, selectedVenueId, onSelect }: {
@@ -38,10 +45,12 @@ function Markers({ mics, selectedVenueId, onSelect }: {
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: true,
     })
+    const spots = displaySpots(mics)
     for (const [venueId, list] of groupByVenue(mics)) {
       const venue = list[0].venue
+      const at = spots.get(venueId) ?? venue
       const tonight = list.some(m => isTonight(m, m.venue.timezone))
-      const marker = L.marker([venue.lat, venue.lng], {
+      const marker = L.marker([at.lat, at.lng], {
         icon: pinIcon(venue.name, venueId === selectedVenueId, tonight, venue.locationHidden),
         zIndexOffset: venueId === selectedVenueId ? 1000 : 0,
         keyboard: true,
@@ -57,7 +66,7 @@ function Markers({ mics, selectedVenueId, onSelect }: {
 
     // Fit the map to what's showing (only when nothing is selected, so selecting doesn't jump the view).
     if (!selectedVenueId && mics.length) {
-      const b = L.latLngBounds(mics.map(m => [m.venue.lat, m.venue.lng] as [number, number]))
+      const b = L.latLngBounds(mics.map(m => { const p = spots.get(m.venueId) ?? m.venue; return [p.lat, p.lng] as [number, number] }))
       map.fitBounds(b, { padding: [50, 50], maxZoom: 13 })
     }
     return () => { map.removeLayer(group) }
@@ -70,7 +79,11 @@ function FlyToSelected({ mics, selectedVenueId }: { mics: OpenMicWithVenue[]; se
   const map = useMap()
   useEffect(() => {
     const v = mics.find(m => m.venueId === selectedVenueId)?.venue
-    if (v) map.flyTo([v.lat, v.lng], Math.max(map.getZoom(), 13), { duration: 0.8 })
+    if (v) {
+      const at = displaySpots(mics).get(v.id) ?? v
+      // Hidden venues sit near others in the same town, so zoom in far enough for them to separate.
+      map.flyTo([at.lat, at.lng], Math.max(map.getZoom(), v.locationHidden ? 15 : 13), { duration: 0.8 })
+    }
   }, [selectedVenueId]) // eslint-disable-line react-hooks/exhaustive-deps
   return null
 }

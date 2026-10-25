@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   AGE_OPTIONS, FORMAT_OPTIONS, GENRE_OPTIONS, SIGNUP_OPTIONS,
   type DayOfWeek, type Venue, type WeekOfMonth,
 } from '../types'
 import {
-  EMPTY_MIC, EMPTY_VENUE, TIMEZONES, draftsFromMic, geocode, guessTimezone, validate,
+  EMPTY_MIC, EMPTY_VENUE, TIMEZONES, draftsFromMic, geocode, guessTimezone, suggestVenues, validate,
   type Errors, type MicDraft, type VenueDraft,
 } from '../lib/submission'
 import { fetchVenuePrivate, submitOpenMic, updateListing } from '../lib/api'
 import type { OpenMicWithVenue } from '../types'
 import PinPicker from './PinPicker'
+import { normalizePlace } from '../lib/places'
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const WEEKS: { v: WeekOfMonth; label: string }[] = [
@@ -73,22 +74,60 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
     setErrors(prev => (Object.keys(prev).length ? validate(venue, mic) : prev))
   }, [venue, mic])
 
-  const findOnMap = async () => {
-    const q = [venue.address, venue.city, venue.region, venue.postalCode].map(s => s.trim()).filter(Boolean).join(', ')
-    if (!venue.address.trim() || !venue.city.trim()) { setLookup({ busy: false, msg: 'Enter the street address and city first.' }); return }
+  // Address lookup. The button always moves the pin; the automatic lookup (after you stop typing the
+  // street, city and state) fills in a blank ZIP and never overrides a pin you placed or a ZIP you typed.
+  const addrTouched = useRef(false)   // the person has typed in the address fields
+  const pinPlaced = useRef(false)     // the person has dragged/clicked the pin
+  const lookupSeq = useRef(0)         // ignore answers that arrive after a newer lookup started
+
+  const lookup_ = async (manual: boolean) => {
+    const place = normalizePlace(venue.city, venue.region)
+    const q = [venue.address, place.city, place.region, manual ? venue.postalCode : ''].map(s => s.trim()).filter(Boolean).join(', ')
+    if (!venue.address.trim() || !place.city) { if (manual) setLookup({ busy: false, msg: 'Enter the street address and city first.' }); return }
+    const seq = ++lookupSeq.current
     setLookup({ busy: true, msg: '' })
     try {
       const hit = await geocode(q)
-      if (!hit) { setLookup({ busy: false, msg: 'Couldn’t find that address. Check it, or click the map to place the pin yourself.' }); return }
-      setV({ lat: hit.lat, lng: hit.lng, timezone: guessTimezone(hit.lat, hit.lng) ?? venue.timezone })
-      setLookup({ busy: false, msg: 'Found it. Drag the pin or click the map if it’s slightly off.' })
+      if (seq !== lookupSeq.current) return
+      if (!hit) { setLookup({ busy: false, msg: manual ? 'Couldn’t find that address. Check it, or click the map to place the pin yourself.' : '' }); return }
+      const movePin = manual || !pinPlaced.current
+      if (manual) pinPlaced.current = false
+      setVenue(v => ({
+        ...v,
+        ...(movePin ? { lat: hit.lat, lng: hit.lng, timezone: guessTimezone(hit.lat, hit.lng) ?? v.timezone } : {}),
+        postalCode: v.postalCode.trim() ? v.postalCode : (hit.postcode ?? ''),
+      }))
+      const zipFilled = !venue.postalCode.trim() && !!hit.postcode
+      setLookup({ busy: false, msg: `${movePin ? 'Found it. Drag the pin or click the map if it’s slightly off.' : 'Looked up the address.'}${zipFilled ? ` ZIP ${hit.postcode} filled in.` : ''}` })
     } catch (e) {
-      setLookup({ busy: false, msg: e instanceof Error ? e.message : 'Address lookup failed.' })
+      if (seq === lookupSeq.current) setLookup({ busy: false, msg: manual ? (e instanceof Error ? e.message : 'Address lookup failed.') : '' })
     }
   }
+  const findOnMap = () => lookup_(true)
 
-  const onPin = (p: { lat: number; lng: number }) =>
+  // Automatic lookup once street, city and state are filled in and typing has paused.
+  useEffect(() => {
+    if (!addrTouched.current || !isNew) return
+    const place = normalizePlace(venue.city, venue.region)
+    if (venue.address.trim().length < 3 || !place.city || !place.region) return
+    const t = window.setTimeout(() => { void lookup_(false) }, 1100)
+    return () => window.clearTimeout(t)
+  }, [venue.address, venue.city, venue.region]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const typeAddr = (p: Partial<VenueDraft>) => { addrTouched.current = true; setV(p) }
+  // Tidy "New York City"/"NYC"/"New Jersey" into one standard form when leaving the box.
+  const tidyPlace = () => setVenue(v => {
+    const p = normalizePlace(v.city, v.region)
+    return p.city === v.city && p.region === v.region ? v : { ...v, city: p.city, region: p.region }
+  })
+
+  const onPin = (p: { lat: number; lng: number }) => {
+    pinPlaced.current = true
     setV({ lat: p.lat, lng: p.lng, timezone: guessTimezone(p.lat, p.lng) ?? venue.timezone })
+  }
+
+  // "Already on the map?" suggestions while typing a new venue's name (hidden venues are never offered).
+  const suggestions = useMemo(() => (editing ? [] : suggestVenues(venues, venue.name)), [venues, venue.name, editing])
 
   const toggleGenre = (g: string) =>
     setM({ genres: mic.genres.includes(g) ? mic.genres.filter(x => x !== g) : [...mic.genres, g] })
@@ -165,8 +204,19 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
             {isNew && (
               <>
                 <Field label="Venue name" error={errors.venueName} htmlFor="v-name">
-                  <input id="v-name" className="field" value={venue.name} maxLength={120} onChange={e => setV({ name: e.target.value })} />
+                  <input id="v-name" className="field" value={venue.name} maxLength={120} autoComplete="off" onChange={e => setV({ name: e.target.value })} />
                 </Field>
+                {suggestions.length > 0 && (
+                  <div className="border-2 border-ink bg-white" role="group" aria-label="Venues already on the map">
+                    <p className="px-3 py-2 text-xs font-extrabold uppercase tracking-wider bg-accent-soft border-b-2 border-ink">Already on the map? Tap to use it</p>
+                    {suggestions.map(v => (
+                      <button type="button" key={v.id} className="block w-full text-left px-3 py-2 text-sm border-b border-line last:border-b-0 hover:bg-ground"
+                        onClick={() => setV({ existingVenueId: v.id })}>
+                        <strong>{v.name}</strong> <span className="text-mute">· {v.address}, {v.city}{v.region ? `, ${v.region}` : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="border-2 border-line bg-white p-3">
                   <label className="flex items-start gap-2 text-sm font-bold cursor-pointer">
                     <input type="checkbox" className="mt-1" checked={venue.locationHidden} onChange={e => setV({ locationHidden: e.target.checked })} />
@@ -180,14 +230,14 @@ export default function SubmitModal({ user, venues, editing, onClose }: {
                 </div>
                 {privLoading && <p className="text-xs text-mute">Loading the private address…</p>}
                 <Field label={venue.locationHidden ? 'Exact address (kept private)' : 'Street address'} error={errors.address} htmlFor="v-addr">
-                  <input id="v-addr" className="field" autoComplete="street-address" value={venue.address} onChange={e => setV({ address: e.target.value })} />
+                  <input id="v-addr" className="field" autoComplete="street-address" value={venue.address} onChange={e => typeAddr({ address: e.target.value })} />
                 </Field>
                 <div className="grid grid-cols-[1fr_80px_110px] gap-2">
                   <Field label="City" error={errors.city} htmlFor="v-city">
-                    <input id="v-city" className="field" value={venue.city} onChange={e => setV({ city: e.target.value })} />
+                    <input id="v-city" className="field" value={venue.city} onChange={e => typeAddr({ city: e.target.value })} onBlur={tidyPlace} />
                   </Field>
                   <Field label="State" htmlFor="v-region">
-                    <input id="v-region" className="field" maxLength={30} value={venue.region} onChange={e => setV({ region: e.target.value })} />
+                    <input id="v-region" className="field" maxLength={30} value={venue.region} onChange={e => typeAddr({ region: e.target.value })} onFocus={e => e.target.select()} onBlur={tidyPlace} />
                   </Field>
                   <Field label="ZIP" htmlFor="v-zip">
                     <input id="v-zip" className="field" inputMode="numeric" maxLength={10} value={venue.postalCode} onChange={e => setV({ postalCode: e.target.value })} />

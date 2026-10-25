@@ -93,5 +93,19 @@ const hd = s.draftsFromMic(hiddenSaved)
 eq('editing a hidden venue starts with a blank address and no pin (real one is loaded privately)', [hd.venue.address, hd.venue.lat, hd.venue.lng, hd.venue.locationHidden], ['', null, null, true])
 eq('a hidden draft is incomplete until the private address is loaded', Object.keys(s.validate(hd.venue, hd.mic)).sort(), ['address', 'location'])
 
+// venue-name suggestions
+const mkv = (id, name, city, hidden = false) => ({ id, name, city, locationHidden: hidden })
+const vs = [mkv('1', 'The Tavern on Main', 'Hackensack'), mkv('2', 'Tavern 33', 'Ridgewood'), mkv('3', 'Joe\'s Cafe', 'Hoboken'), mkv('4', 'Secret Porch', 'Hoboken', true), mkv('5', 'Old Tavern Inn', 'Closter')]
+eq('typing "tav" finds names containing it, starts-with first', s.suggestVenues(vs, 'tav').map(v => v.id), ['2', '1', '5'])
+eq('ignores "The", case and punctuation', s.suggestVenues(vs, 'THE TAVERN ON MAIN!').map(v => v.id), ['1'])
+eq('apostrophes and "&" do not break matching', s.suggestVenues(vs, 'joes').map(v => v.id), ['3'])
+eq('one letter is too little to suggest', s.suggestVenues(vs, 't'), [])
+eq('hidden venues are never suggested', s.suggestVenues(vs, 'porch'), [])
+eq('limit is respected', s.suggestVenues(vs, 'tav', 2).length, 2)
+eq('no match is empty', s.suggestVenues(vs, 'zzz'), [])
+// city / state tidied on the way to the database
+const nyv = s.venueFields({ ...goodVenue, city: 'New York City', region: 'New York' })
+eq('venueFields stores the canonical city and state', [nyv.city, nyv.region], ['New York', 'NY'])
+
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
