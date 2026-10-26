@@ -22,6 +22,8 @@ const DEMO = import.meta.env.DEV && import.meta.env.VITE_DEMO_DATA === '1'
 
 interface State {
   user: User | null
+  /** False until we know whether someone is signed in, so links like ?add=1 don't act too early. */
+  authReady: boolean
   isAdmin: boolean
   needsPasswordReset: boolean
   mics: OpenMicWithVenue[]
@@ -54,6 +56,7 @@ let initialised = false
 
 export const useStore = create<State>((set, get) => ({
   user: null,
+  authReady: false,
   isAdmin: false,
   needsPasswordReset: false,
   mics: [],
@@ -71,17 +74,17 @@ export const useStore = create<State>((set, get) => ({
     if (initialised) return
     initialised = true
     void get().fetchMics()
-    if (!supabaseConfigured) return
+    if (!supabaseConfigured) { set({ authReady: true }); return }
 
     const applySession = async (user: User | null) => {
-      set({ user, isAdmin: false })
+      set({ user, isAdmin: false, authReady: true })
       if (user) {
         // is_admin() is a security-definer function; the admins table itself is invisible to clients.
         const { data } = await supabase.rpc('is_admin')
         set({ isAdmin: data === true })
       }
     }
-    supabase.auth.getSession().then(({ data }) => applySession(data.session?.user ?? null))
+    supabase.auth.getSession().then(({ data }) => applySession(data.session?.user ?? null), () => set({ authReady: true }))
     supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') set({ needsPasswordReset: true })
       void applySession(session?.user ?? null)

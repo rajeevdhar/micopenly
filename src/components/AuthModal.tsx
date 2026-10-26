@@ -19,7 +19,7 @@ const lock = () => {
   try { localStorage.setItem(LOCK_KEY, '1') } catch { /* private mode: the in-memory flag still holds for this visit */ }
 }
 
-export default function AuthModal({ onClose, initialMode = 'login' }: { onClose: () => void; initialMode?: Mode }) {
+export default function AuthModal({ onClose, initialMode = 'login', reason }: { onClose: () => void; initialMode?: Mode; /** Why we're asking, e.g. when someone follows an "add your open mic" link. */ reason?: string }) {
   const [mode, setMode] = useState<Mode>(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -71,6 +71,7 @@ export default function AuthModal({ onClose, initialMode = 'login' }: { onClose:
           {mode === 'register' && underAge ? (
             <p role="alert" className="text-sm border-2 border-ink bg-white px-3 py-3">{AGE_MESSAGES.locked}</p>
           ) : (<>
+          {reason && (mode === 'register' || mode === 'login') && !notice && <p className="text-sm border-2 border-ink bg-white px-3 py-2">{reason}</p>}
           {needsEmail && (
             <div>
               <label className="label" htmlFor="auth-email">Email</label>

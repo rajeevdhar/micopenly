@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { applyFilters, groupByVenue, sortByNext, useStore } from './store'
 import { supabaseConfigured } from './lib/supabase'
 import OpenMicMap from './components/OpenMicMap'
@@ -13,13 +13,14 @@ import MySubmissionsModal from './components/MySubmissionsModal'
 import Intro from './components/Intro'
 import { isTonight } from './lib/schedule'
 import { distanceMiles, formatMiles, sortByDistance } from './lib/geo'
+import { browserStore, clearRememberedAdd, hasRememberedAdd, rememberAdd, wantsToAdd, withoutAddParam } from './lib/intent'
 import { countIncomingRequests, countOpenReports, countPending, fetchApprovedVenues } from './lib/api'
 import type { OpenMicWithVenue, Venue } from './types'
 
 export default function App() {
   const {
     user, isAdmin, needsPasswordReset, mics, loading, error, filters, selectedVenueId, view,
-    sort, userPos, init, fetchMics, selectVenue, setView, logout,
+    authReady, sort, userPos, init, fetchMics, selectVenue, setView, logout,
   } = useStore()
   const [showAuth, setShowAuth] = useState(false)
   const [showSubmit, setShowSubmit] = useState(false)
@@ -32,6 +33,11 @@ export default function App() {
   const [reportCount, setReportCount] = useState(0)
   const [incoming, setIncoming] = useState(0)
   const [flash, setFlash] = useState('')
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [authReason, setAuthReason] = useState('')
+  // Followed an "add your open mic" link (?add=1)? Read it once, then take it out of the address bar.
+  const addLink = useRef(wantsToAdd(window.location.search))
+  const closeAuth = () => { setShowAuth(false); setAuthMode('login'); setAuthReason('') }
 
   const notify = (message: string) => {
     setFlash(message)
@@ -53,6 +59,20 @@ export default function App() {
   }
 
   useEffect(() => { init() }, [init])
+
+  // "Add your open mic" links: signed in → open the form; signed out → ask them to create an account first,
+  // and remember why for a day so it still works after they confirm their email.
+  useEffect(() => {
+    if (!authReady || !supabaseConfigured) return
+    const store = browserStore()
+    if (addLink.current) window.history.replaceState(null, '', withoutAddParam(window.location.pathname, window.location.search, window.location.hash))
+    if (user) {
+      if (addLink.current || hasRememberedAdd(store)) { addLink.current = false; clearRememberedAdd(store); void openSubmit() }
+    } else if (addLink.current) {
+      rememberAdd(store)
+      setAuthMode('register'); setAuthReason('Create a free account to add your open mic. It only takes a minute.'); setShowAuth(true)
+    }
+  }, [authReady, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => sortByNext(applyFilters(mics, filters)), [mics, filters])
   const byVenue = useMemo(() => groupByVenue(filtered), [filtered])
@@ -216,7 +236,7 @@ export default function App() {
       )}
 
       {(showAuth || needsPasswordReset) && (
-        <AuthModal initialMode={needsPasswordReset ? 'reset' : 'login'} onClose={() => setShowAuth(false)} />
+        <AuthModal initialMode={needsPasswordReset ? 'reset' : authMode} reason={authReason} onClose={closeAuth} />
       )}
     </div>
   )

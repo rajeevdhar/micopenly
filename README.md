@@ -26,8 +26,12 @@ insert into public.admins (user_id) select id from auth.users where email = 'you
 - New listings are `pending` until an admin approves them. No scraping; listings come from users.
 - "Tonight" is computed in the venue's timezone.
 - Accounts are for people 16 and older. The sign-up form asks for a date of birth, checks it in the browser (`src/lib/age.ts`), and sends only `age_confirmed_16: true` with the new account. The date itself is never sent or stored. After a failed check the form stays closed in that browser. It is self-attestation, not ID verification.
+- `/?add=1` is the link to hand to hosts. It opens the add form, or asks them to create an account first and remembers why for 24 hours so it still works after they confirm their email (`src/lib/intent.ts`). Extra parameters such as `utm_source` are kept.
 - "Near me" runs entirely in the browser (`src/lib/geo.ts`). The visitor's position is kept in memory only and is never sent or saved.
 - Abuse limits live in the database (`enforce_daily_limit`), not just the UI: 5 venues, 10 open mics, 10 reports, 30 confirmations per user per 24 hours; admins exempt.
+
+## First listings
+`supabase/seed/2026-10-25_first_listings.sql` holds the first three real NYC listings (Pete's Candy Store, Otto's Shrunken Head, the Nuyorican open mic at the Loisaida Center). They are approved but deliberately unverified, with a note wherever sources disagreed or a required field was a guess. Each is sourced in the file's header. Safe to re-run.
 
 ## Migrations
 Files in `supabase/migrations/` are additive and idempotent. `supabase/schema.sql` always contains everything, so a fresh project needs only that file.
